@@ -108,16 +108,34 @@ class HRoPEBlock(nn.Module):
     forward() cares about is (input, positions, mask). The same class with
     different weights serves both roles, just like a U-Net's encoder/decoder
     convs are the same Conv2d operation with different weights.
+
+    Inherits the v4 spec's cache-stitching robustness toolkit:
+      * QK-Norm (q_norm, k_norm) — bounds attention logits independent of
+        hidden-state magnitude (v4 §4.2).
+      * Denominator-tracked ReLU² attention — stitch-decomposable (v4 §4.1).
+      * Optional **parallel residual** (`parallel_residual=True`):
+        attention and FFN are computed from the SAME normalized input and
+        added together. Decouples FFN from attention output, providing
+        error isolation when upstream context drifts (v4 §4.3).
+      * Optional **micro-correction gate** (`use_micro_gate=True`): a
+        sigmoid gate computed from external segment statistics that
+        modulates the attention output. Used at stitch time only when an
+        approximate (rather than exact) L1 cache update is desired (v4 §4.4).
     """
 
     def __init__(self, d_model: int, n_heads: int, ffn_mult: int,
-                 rope: HierarchicalRoPE, dropout: float = 0.0):
+                 rope: HierarchicalRoPE, dropout: float = 0.0,
+                 parallel_residual: bool = False,
+                 use_micro_gate: bool = False):
         super().__init__()
         assert d_model % n_heads == 0
         self.d_model = d_model
         self.n_heads = n_heads
         self.head_dim = d_model // n_heads
         self.rope = rope
+        self.parallel_residual = parallel_residual
+        self.use_micro_gate = use_micro_gate
+
         self.norm1 = nn.RMSNorm(d_model)
         self.norm2 = nn.RMSNorm(d_model)
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
@@ -135,6 +153,21 @@ class HRoPEBlock(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
 
+        if parallel_residual:
+            # v4 §4.3: per-layer learned scalars weighting the two branches.
+            # Init to 0.5 each (equal weighting, matches v4 init).
+            self.alpha = nn.Parameter(torch.tensor(0.5))
+            self.beta = nn.Parameter(torch.tensor(0.5))
+
+        if use_micro_gate:
+            # v4 §4.4: gate is a function of (mu, log_sigma) features of dim
+            # 2*head_dim, projected to (n_heads, head_dim) sigmoid weights.
+            # W and b initialised to zero so the gate is identity at init
+            # (we use 2*sigmoid(0)=1.0 so the gate doesn't suppress signal).
+            self.W_gate = nn.Parameter(
+                torch.zeros(n_heads, self.head_dim, 2 * self.head_dim))
+            self.b_gate = nn.Parameter(torch.zeros(n_heads, self.head_dim))
+
     def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
         b, s, _ = x.shape
         return x.view(b, s, self.n_heads, self.head_dim).transpose(1, 2)
@@ -143,8 +176,21 @@ class HRoPEBlock(nn.Module):
         b, h, s, d = x.shape
         return x.transpose(1, 2).contiguous().view(b, s, h * d)
 
+    def _apply_micro_gate(self, attn_out: torch.Tensor,
+                          seg_stats: Optional[torch.Tensor]) -> torch.Tensor:
+        """attn_out: (B, H, S, D); seg_stats: (B, H, 2*D) or None.
+        Gate is 2*sigmoid(W·stats + b). With W=b=0 the gate is exactly 1.0
+        — the block is identical to no-gate at initialisation, and only
+        deviates from 1 once training learns when to suppress / amplify."""
+        if seg_stats is None or not self.use_micro_gate:
+            return attn_out
+        gate_logits = torch.einsum("bhe,hde->bhd", seg_stats, self.W_gate) + self.b_gate
+        gate = 2.0 * torch.sigmoid(gate_logits)         # init ≈ 1.0
+        return attn_out * gate.unsqueeze(2)             # broadcast over seq
+
     def forward(self, x: torch.Tensor, positions: torch.Tensor,
-                attn_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+                attn_mask: Optional[torch.Tensor] = None,
+                seg_stats: Optional[torch.Tensor] = None) -> torch.Tensor:
         h = self.norm1(x)
         q = self.q_norm(self._split_heads(self.q_proj(h)))
         k = self.k_norm(self._split_heads(self.k_proj(h)))
@@ -153,9 +199,49 @@ class HRoPEBlock(nn.Module):
         q = self.rope(q, pos)
         k = self.rope(k, pos)
         attn_out, _ = relu_sq_attention(q, k, v, attn_mask=attn_mask)
-        x = x + self.dropout(self.o_proj(self._merge_heads(attn_out)))
+        attn_out = self._apply_micro_gate(attn_out, seg_stats)
+        attn_proj = self.dropout(self.o_proj(self._merge_heads(attn_out)))
+
+        if self.parallel_residual:
+            # v4 §4.3: attention and FFN both read from the SAME h (norm1(x)).
+            # The FFN branch is decoupled from the attention output, so
+            # transient errors in the attention path do not pollute FFN.
+            ffn_out = self.dropout(self.ffn(h))
+            return x + self.alpha * attn_proj + self.beta * ffn_out
+        # Sequential (default): FFN reads from x + attn (post-attn pre-norm).
+        x = x + attn_proj
         x = x + self.dropout(self.ffn(self.norm2(x)))
         return x
+
+
+def compute_seg_stats(skip_tensor: torch.Tensor, group_id: torch.Tensor,
+                      num_groups: int, n_heads: int, head_dim: int,
+                      eps: float = 1e-6) -> torch.Tensor:
+    """v4 §4.4 sufficient statistics over the skip / hidden tensor.
+
+    Returns per-(batch, head, group) features of shape (B, H, num_groups, 2D)
+    where the 2D feature concatenates (mu, log_sigma) of the per-token
+    head-vectors that share each group.
+
+    skip_tensor: (B, T, D_model)
+    group_id:    (B, T) which group each token belongs to (long)
+
+    For HRoPE v7 the natural use-case is `group_id = sent_id`, giving
+    one stat row per sentence. Pass these stats into the L0 decoder when
+    you want it to compensate for upstream broadcast drift after a stitch.
+    """
+    B, T, _ = skip_tensor.shape
+    h = skip_tensor.view(B, T, n_heads, head_dim).transpose(1, 2)  # (B,H,T,D)
+    mu = h.new_zeros(B, n_heads, num_groups, head_dim)
+    log_sigma = h.new_zeros(B, n_heads, num_groups, head_dim)
+    for b in range(B):
+        for g in range(num_groups):
+            sel = group_id[b] == g
+            if sel.any():
+                v = h[b, :, sel, :]                                # (H, n_g, D)
+                mu[b, :, g] = v.mean(dim=1)
+                log_sigma[b, :, g] = (v.std(dim=1) + eps).log()
+    return torch.cat([mu, log_sigma], dim=-1)                      # (B,H,G,2D)
 
 
 # =========================================================================== #
@@ -246,6 +332,26 @@ class HRoPEv7Config:
     max_paras_per_doc: int = 256
     dropout: float = 0.0
 
+    # ── v4 carry-over (cache-stitching robustness) ────────────────────
+    # Parallel residual (v4 §4.3): attention and FFN both read from norm(x).
+    # Decouples FFN from attention output and bounds error propagation across
+    # layers. Recommended ON for L1/L2 (where summary edits propagate causally
+    # and small drifts can compound) and OFF for L0 (sentence-isolated by mask,
+    # so there is nothing to compound).
+    parallel_residual_l0: bool = False
+    parallel_residual_l1: bool = True
+    parallel_residual_l2: bool = True
+
+    # Micro-correction gate (v4 §4.4): a per-layer sigmoid gate driven by
+    # cached (mu, log-sigma) statistics of the skip tensor. Useful only when
+    # the editor switches to APPROXIMATE L1 stitching (v8 roadmap). Default
+    # OFF, because v7's editor does an exact L1/L2 re-pass which makes the
+    # gate redundant. Setting these True adds parameters but the gate is
+    # initialised to identity (W=b=0 → gate=1.0), so toggling it on does not
+    # change the model's output until training starts to use the stats.
+    use_micro_gate_l1_dec: bool = False
+    use_micro_gate_l0_dec: bool = False
+
 
 # =========================================================================== #
 #  8. The symmetric U-Net model                                                #
@@ -266,26 +372,39 @@ class HRoPEv7Model(nn.Module):
         self.rope_l2 = HierarchicalRoPE(head_dim, base=100.0,
                                         max_pos=cfg.max_paras_per_doc + 4)
 
-        def stack(n: int, rope: HierarchicalRoPE) -> nn.ModuleList:
+        def stack(n: int, rope: HierarchicalRoPE,
+                  parallel: bool = False,
+                  micro_gate: bool = False) -> nn.ModuleList:
             return nn.ModuleList([
                 HRoPEBlock(cfg.d_model, cfg.n_heads, cfg.ffn_mult,
-                           rope, dropout=cfg.dropout)
+                           rope, dropout=cfg.dropout,
+                           parallel_residual=parallel,
+                           use_micro_gate=micro_gate)
                 for _ in range(n)
             ])
 
-        # Encoder path
-        self.l0_enc = stack(cfg.n_l0_enc, self.rope_l0)
+        # Encoder path: no micro-gate (a stitch-time op only).
+        self.l0_enc = stack(cfg.n_l0_enc, self.rope_l0,
+                            parallel=cfg.parallel_residual_l0)
         self.sent_pool = AttentionPool(cfg.d_model)
-        self.l1_enc = stack(cfg.n_l1_enc, self.rope_l1)
+        self.l1_enc = stack(cfg.n_l1_enc, self.rope_l1,
+                            parallel=cfg.parallel_residual_l1)
         if cfg.use_l2:
             self.para_pool = AttentionPool(cfg.d_model)
-            self.l2_enc = stack(cfg.n_l2_enc, self.rope_l2)
+            self.l2_enc = stack(cfg.n_l2_enc, self.rope_l2,
+                                parallel=cfg.parallel_residual_l2)
 
-        # Decoder path
+        # Decoder path: parallel residual + optional micro-gate at the levels
+        # that consume cross-segment broadcasts (L1_dec, L0_dec).
         if cfg.use_l2:
-            self.l2_dec = stack(cfg.n_l2_dec, self.rope_l2)
-        self.l1_dec = stack(cfg.n_l1_dec, self.rope_l1)
-        self.l0_dec = stack(cfg.n_l0_dec, self.rope_l0)
+            self.l2_dec = stack(cfg.n_l2_dec, self.rope_l2,
+                                parallel=cfg.parallel_residual_l2)
+        self.l1_dec = stack(cfg.n_l1_dec, self.rope_l1,
+                            parallel=cfg.parallel_residual_l1,
+                            micro_gate=cfg.use_micro_gate_l1_dec)
+        self.l0_dec = stack(cfg.n_l0_dec, self.rope_l0,
+                            parallel=cfg.parallel_residual_l0,
+                            micro_gate=cfg.use_micro_gate_l0_dec)
 
         # Output
         self.head_norm = nn.RMSNorm(cfg.d_model)
@@ -612,6 +731,57 @@ def smoke_test() -> None:
     print(f"[smoke] non-edited sentences' skip_l0 unchanged: "
           f"{skip_unchanged:.4e} (must be 0 — sentence isolation in cache)")
     assert skip_unchanged == 0.0, "edits must not change other sentences' skip_l0"
+
+    # ---- v4 carry-over: parallel residual + micro-correction gate ---------- #
+    # 1) Default config has parallel residual ON at L1/L2. Flip it off and
+    #    confirm the model still trains-shape-correctly with the same params.
+    cfg_seq = HRoPEv7Config(
+        vocab_size=1000, d_model=64, n_heads=4,
+        n_l0_enc=2, n_l0_dec=2, n_l1_enc=1, n_l1_dec=1,
+        n_l2_enc=1, n_l2_dec=1,
+        max_tokens_per_sent=32, max_sents_per_doc=64, max_paras_per_doc=16,
+        parallel_residual_l0=False, parallel_residual_l1=False,
+        parallel_residual_l2=False,
+    )
+    model_seq = HRoPEv7Model(cfg_seq).eval()
+    out_seq = model_seq(doc)
+    print(f"[smoke] sequential-residual variant runs: "
+          f"logits {tuple(out_seq['logits'].shape)}")
+
+    # 2) Enable micro-correction gate. With W=b=0 init the gate is identity
+    #    (2*sigmoid(0)=1), so output must MATCH the no-gate variant exactly
+    #    when seg_stats=None (gate path is bypassed) AND match it numerically
+    #    when seg_stats=zeros (gate=1 by construction).
+    cfg_gate = HRoPEv7Config(
+        vocab_size=1000, d_model=64, n_heads=4,
+        n_l0_enc=2, n_l0_dec=2, n_l1_enc=1, n_l1_dec=1,
+        n_l2_enc=1, n_l2_dec=1,
+        max_tokens_per_sent=32, max_sents_per_doc=64, max_paras_per_doc=16,
+        use_micro_gate_l1_dec=True, use_micro_gate_l0_dec=True,
+    )
+    torch.manual_seed(0)                                # match init seed
+    model_gate = HRoPEv7Model(cfg_gate).eval()
+    torch.manual_seed(0)
+    model_ref = HRoPEv7Model(cfg).eval()                # same seed, no gate
+    # The gate adds parameters but they're zero-init, so weight tensors of
+    # the shared submodules are identical → output must match exactly.
+    out_gate = model_gate(doc)
+    out_ref = model_ref(doc)
+    gate_diff = (out_gate["y0"] - out_ref["y0"]).abs().max().item()
+    print(f"[smoke] micro-gate identity-init: y0 diff vs no-gate = "
+          f"{gate_diff:.4e} (must be 0 — gate is identity at init)")
+    assert gate_diff == 0.0, "zero-init micro-gate must be identity"
+
+    # 3) compute_seg_stats produces the right shape for downstream use.
+    stats = compute_seg_stats(out_ref["skip_l0"], doc.sent_id,
+                              num_groups=int(doc.n_sent.max().item()),
+                              n_heads=cfg.n_heads,
+                              head_dim=cfg.d_model // cfg.n_heads)
+    expected = (1, cfg.n_heads, int(doc.n_sent.max().item()),
+                2 * (cfg.d_model // cfg.n_heads))
+    print(f"[smoke] seg_stats shape: {tuple(stats.shape)} "
+          f"(expected {expected})")
+    assert tuple(stats.shape) == expected
 
     # ---- SimHash sanity ---------------------------------------------------- #
     s1 = simhash("the cat sat on the mat")

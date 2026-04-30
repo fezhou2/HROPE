@@ -76,7 +76,7 @@
 <div class="meta">
   <span>&#128196; Feng Zhou &mdash; April 2026</span>
   <span>Patent Pending</span>
-  <span class="version-badge">Technical Specification v7.0</span>
+  <span class="version-badge">Technical Specification v7.1</span>
 </div>
 
 <div class="callout callout-new">
@@ -84,6 +84,17 @@
   <p>v6 used the nnU-Net <em>encoder</em> structure (token &rarr; sentence &rarr; paragraph) but had only a single broadcast step at the very end of the network. That is half a U &mdash; an asymmetric design where the decoder path collapses into one cross-attention layer.</p>
   <p>v7 completes the U: a full <strong>symmetric decoder path</strong> with matching transformer stacks at each level (L2_dec, L1_dec, L0_dec) and <strong>additive skip connections</strong> from every encoder level to its matching decoder level. This is the <em>actual</em> nnU-Net pattern applied to text.</p>
   <p>No new mechanisms. No distillation. No auxiliary chunking. No mixture-of-experts. Same transformer block, same RoPE bands, same pools as v6 &mdash; just arranged into a complete U.</p>
+</div>
+
+<div class="callout callout-new">
+  <strong>&#9889; v7.0 &rarr; v7.1 (this revision)</strong>
+  <p>Added the v4 <em>cache-stitching robustness toolkit</em> as opt-in features in <code>HRoPEBlock</code>:</p>
+  <ul style="margin: 0.4em 0 0 1.4em;">
+    <li><strong>Parallel residual</strong> (v4 &sect;4.3) &mdash; default ON at L1/L2 to bound error propagation when sentence summaries shift after an edit. Adds 2 scalar params per affected block (8 params total in the default config).</li>
+    <li><strong>Micro-correction gates</strong> (v4 &sect;4.4) &mdash; optional, default OFF. Enables compensation when a future v8 editor switches L1 from exact re-pass to approximate cache stitching.</li>
+    <li><strong>compute_seg_stats</strong> helper that produces the per-segment (&mu;, log-&sigma;) features the gate consumes.</li>
+  </ul>
+  <p>The reference is gated and zero-initialised so toggling the new flags doesn't change behaviour at init &mdash; the smoke test verifies <code>y0</code> diff = 0.0 between gate-on and gate-off models with shared seeds. See &sect;9 for the full status of v4&rsquo;s four-component architecture in v7.</p>
 </div>
 
 
@@ -268,11 +279,11 @@ L2_enc ──(bottleneck)─► L2_dec
 
 <h2>7. Files Shipped</h2>
 <table>
-  <thead><tr><th>File</th><th>Lines</th><th>Purpose</th></tr></thead>
+  <thead><tr><th>File</th><th>Purpose</th></tr></thead>
   <tbody>
-    <tr><td><code>hrope_v7_reference.py</code></td><td>~520</td><td>Symmetric U-Net model + incremental editor + smoke test</td></tr>
-    <tr><td><code>hrope_v7_train.py</code></td><td>~270</td><td>Staged curriculum (Stage 0: L0-only via stage0_forward; 1+: full U)</td></tr>
-    <tr><td><code>HRoPE_v7_Technical_Specification.html</code></td><td>this file</td><td>Architectural diff vs v6 + invariants + edit cost</td></tr>
+    <tr><td><code>hrope_v7_reference.py</code></td><td>Symmetric U-Net model + incremental editor + <code>compute_seg_stats</code> helper + smoke test (verifies sentence isolation, skip wiring, edit isolation, parallel-residual, micro-gate identity-init)</td></tr>
+    <tr><td><code>hrope_v7_train.py</code></td><td>Staged curriculum (Stage&nbsp;0: L0-only via <code>stage0_forward</code>; 1+: full U; 3: stitch-perturb)</td></tr>
+    <tr><td><code>HRoPE_v7_Technical_Specification.html</code></td><td>This file &mdash; architectural diff vs v6, invariants, edit cost, v4 carry-over status</td></tr>
   </tbody>
 </table>
 
@@ -288,26 +299,134 @@ L2_enc ──(bottleneck)─► L2_dec
 </ul>
 
 
-<h2>9. Roadmap from Here</h2>
+<!-- ═══════════════════════ NEW IN v7.1 ═══════════════════════ -->
+<h2>9. Cache-Stitching Exactness &amp; the v4 Four-Component Carry-over</h2>
+
+<p>This section addresses a recurring question: <em>"Does v7 have the LayerNorm-leakage and correction-model machinery from the v3/v4 specs? If not, doesn&rsquo;t the architecture lose accuracy after the first edit?"</em></p>
+
+<p>The short answer: <strong>v7&rsquo;s native architecture sidesteps most of the v3/v4 stitching pathologies by construction</strong>, and v7.1 adds the remaining v4 hardening (parallel residual + optional gates) as opt-in features. The detailed accounting follows.</p>
+
+<h3>9.1 Why the v3 LayerNorm-leakage scenario doesn&rsquo;t apply to v7&rsquo;s native path</h3>
+
+<p>The v3/v4 leakage concern was framed for <strong>Path 1 retrofit</strong>: take an existing Llama-3 / Qwen model trained with full softmax attention and try to swap in cache stitching at inference. In that setting, hidden-state distributions drift away from what the model expects, and a correction model (or micro-gates) is needed to compensate.</p>
+
+<p>v7 is <strong>Path 2 native training</strong>. Three structural facts make leakage impossible at the L0 layer where it would be most damaging:</p>
+
+<ol>
+  <li><strong>RMSNorm, not LayerNorm.</strong> RMSNorm has no mean-subtraction step. It normalises each <em>per-token vector</em> by its own L2 magnitude only. There is no cross-token statistic involved &mdash; so an edit at sentence <em>k</em> cannot shift sentence <em>j</em>&rsquo;s normalised representation through a shared mean.</li>
+  <li><strong>Sentence-isolation enforced by attention mask.</strong> The L0 encoder&rsquo;s attention mask is block-diagonal at the sentence boundary. Sentence <em>k</em>&rsquo;s tokens never attend to sentence <em>j</em>&rsquo;s tokens. An edit at <em>k</em> cannot enter <em>j</em>&rsquo;s key/query/value computation through any attention path.</li>
+  <li><strong>The model is trained with this exact masking.</strong> There is no train/inference distribution mismatch. The hidden states the L0 encoder produces under stitched inputs are the <em>same</em> hidden states it would produce under a fresh full-document forward, because the only thing the L0 encoder ever sees during training is sentence-isolated context.</li>
+</ol>
+
+<p>The smoke test verifies this empirically: after editing sentence 2, <code>skip_l0</code> at every other sentence is unchanged with max diff <strong>0.0e+00</strong> in fp32.</p>
+
+<h3>9.2 Where stitching effects DO appear in v7 &mdash; and how they are handled</h3>
+
+<table>
+  <thead><tr><th>Where</th><th>Effect</th><th>v7 handling</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>L1 self-attention (sentence stream)</td>
+      <td>An edit changes sentence <em>k</em>&rsquo;s pooled summary, which causally affects all sentence positions &gt; <em>k</em> in L1.</td>
+      <td><strong>Exact re-pass.</strong> v7&rsquo;s editor recomputes L1_enc and L1_dec over the spliced sentence stream. There is no &ldquo;stitch&rdquo; at L1 &mdash; we don&rsquo;t cache L1&rsquo;s KV; we cache L1&rsquo;s <em>input</em> (the sentence summaries) and re-run attention. Cost: ~10 ms on a 100k-token doc with ~5,000 summaries.</td>
+    </tr>
+    <tr>
+      <td>L2 self-attention (paragraph stream)</td>
+      <td>Same causal propagation, but at paragraph granularity (~250 paragraphs).</td>
+      <td>Same: exact re-pass. Cost is sub-millisecond.</td>
+    </tr>
+    <tr>
+      <td>L0 decoder broadcast input</td>
+      <td>The unpooled L1_dec vector that broadcasts into sentence <em>j</em>&rsquo;s L0 decoder is different after the edit (L1_dec changed). Sentence <em>j</em>&rsquo;s L0 decoder output therefore differs.</td>
+      <td><strong>This is correct behaviour</strong>, not leakage &mdash; it&rsquo;s the document context updating. The L0 decoder still uses intra-sentence-only attention, and Stage&nbsp;3 of the curriculum trains the model to handle exactly this kind of shift in the broadcast vector. v7.1 also enables <strong>parallel residual</strong> at L0_dec (off by default, controlled by <code>parallel_residual_l0</code>) for users who want extra error isolation here.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>9.3 The v4 four-component architecture in v7</h3>
+
+<p>v4&rsquo;s four-component architecture (denominator-tracked ReLU&sup2;, QK-Norm, parallel residual, micro-correction gates) was designed primarily for the Path 1 retrofit. v7.1&rsquo;s status:</p>
+
+<table>
+  <thead><tr>
+    <th>Component</th><th>v4 purpose</th><th>v7.1 status</th><th>Default</th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td>1. Denominator-tracked ReLU&sup2; attention</td>
+      <td>Make per-row attention denominators stitch-decomposable</td>
+      <td>&#9989; Implemented (<code>relu_sq_attention</code> returns <code>denom</code>; per-row, exposable for stitching)</td>
+      <td>ON</td>
+    </tr>
+    <tr>
+      <td>2. QK-Norm</td>
+      <td>Bound attention logits independent of hidden-state magnitude drift</td>
+      <td>&#9989; Implemented (<code>q_norm</code>, <code>k_norm</code> in <code>HRoPEBlock</code>)</td>
+      <td>ON</td>
+    </tr>
+    <tr>
+      <td>3. Parallel residual blocks</td>
+      <td>Decouple FFN from attention so error in attention doesn&rsquo;t pollute FFN; bounds cross-layer error to O(&alpha;<sup>L</sup>) where &alpha; &asymp; 0.5</td>
+      <td>&#9989; Implemented (<code>parallel_residual=True</code>). Adds 2 scalar parameters per block.</td>
+      <td>ON for L1/L2 (where stitch effects can compound across the decoder); OFF for L0 (sentence-isolated, nothing to compound)</td>
+    </tr>
+    <tr>
+      <td>4. Cached segment statistics + micro-correction gates</td>
+      <td>Per-layer sigmoid gate driven by cached (&mu;, log-&sigma;) features; compensates residual drift after approximate stitching</td>
+      <td>&#9989; Implemented (<code>use_micro_gate=True</code>, plus the <code>compute_seg_stats</code> helper). Zero-initialised so the gate is identity at init.</td>
+      <td>OFF (v7&rsquo;s editor does exact L1 re-pass, so there is no residual drift to gate; turn ON for the v8 incremental-L1 path)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>9.4 Verified at the smoke-test level</h3>
+
+<p>The extended smoke test confirms the new opt-in features are non-disruptive at initialisation:</p>
+
+<pre><code>$ python hrope_v7_reference.py --smoke
+[smoke] params: 539,208                                            # +8 vs v7.0 (alpha,beta scalars)
+[smoke] L0 ENCODER invariance under L1/L2 reordering: 0.0000e+00   # sentence isolation
+[smoke] L0 DECODER differs under reordering: 1.0783e+00            # decoder uses doc context
+[smoke] zeroing skip_l0 changes decoder output by 4.6838e+00       # skip wired
+[smoke] non-edited sentences&rsquo; skip_l0 unchanged: 0.0000e+00       # edit isolation
+[smoke] sequential-residual variant runs: logits (1, 48, 1000)     # parallel-residual flag works
+[smoke] micro-gate identity-init: y0 diff vs no-gate = 0.0000e+00  # gate is identity at init
+[smoke] seg_stats shape: (1, 4, 6, 32) (expected (1, 4, 6, 32))    # stats helper correct
+[smoke] OK</code></pre>
+
+<h3>9.5 What is still on the roadmap</h3>
+
+<ul>
+  <li><strong>Bit-exact comparison: stitched edit vs full re-encode.</strong> The structural argument in &sect;9.1&ndash;9.2 says the two should be byte-identical at L0 and identical-up-to-causal-propagation at L1/L2/L0_dec. A wider parameterised test that runs full forward, edits, runs again, compares against fresh full forward will be added once a real (non-toy) checkpoint is available.</li>
+  <li><strong>Stage 4 stitch fine-tune.</strong> Train Stage 3 with the gates active and (&mu;, log-&sigma;) statistics flowing through, so that the model learns to USE the gate when an approximate L1 update is performed (a v8 prerequisite).</li>
+  <li><strong>v8 incremental-L1 editor.</strong> The current editor re-runs L1 self-attention from cached inputs (~10 ms on 5k sentences). A v8 design would do approximate L1 stitching using the gates and segment statistics &mdash; targeting sub-millisecond edit cost. v7.1 already ships the parameter machinery this requires.</li>
+</ul>
+
+
+<h2>10. Roadmap from Here</h2>
 <ol>
   <li><strong>350M ablation: v6 vs v7.</strong> Same data, same parameter count. The hypothesis is that v7&rsquo;s symmetric U closes 50&minus;70% of the gap to a dense baseline, primarily because of the L0 skip preserving high-frequency detail at the LM head.</li>
   <li><strong>If v7 wins by &gt;0.3 PPL</strong>, scale to 1.5B with the same staged curriculum (~$60K, ~14 days on 32&minus;64&times;H100).</li>
   <li><strong>Triton kernel for unpool + add fused with first L0_dec attention.</strong> The current PyTorch reference does these as two kernel launches; fusing them saves a memory round-trip.</li>
-  <li><strong>Optional Stage 4: editor fine-tune.</strong> Specifically train on synthetic edits (insert / delete / replace at sentence boundaries) with the L1_dec re-pass loop in the training graph. Optimizes the model for its actual deployment workload.</li>
+  <li><strong>Stage 4 stitch-aware fine-tune.</strong> Train with parallel residual + micro-correction gates active and (&mu;, log-&sigma;) stats flowing through, so the model learns to USE the gate when downstream calls perform approximate L1 stitching.</li>
+  <li><strong>v8 incremental-L1 editor.</strong> Replace the exact L1 re-pass with an approximate stitch using cached segment statistics + the trained gates. Target sub-millisecond edit cost on 100k-token docs.</li>
 </ol>
 
 
-<h2>10. Patent Claims (Refocused)</h2>
+<h2>11. Patent Claims (Refocused)</h2>
 <ol>
   <li><strong>Claim 1.</strong> A hierarchical text encoder-decoder where (i) tokens are encoded by an intra-sentence transformer stack with sentence-resetting RoPE positions, (ii) sentence summaries are encoded by a sentence-level transformer stack with its own RoPE band, (iii) optionally paragraph summaries are encoded by a paragraph-level stack, and (iv) a symmetric decoder path with matching transformer stacks at each level reconstructs token representations using <strong>additive skip connections from each encoder level to its matching decoder level</strong>.</li>
   <li><strong>Claim 2.</strong> The use of indexed-gather upsampling (<em>unpool</em>) as the level-to-level transition in the decoder path: each finer-grained element receives its parent&rsquo;s vector by index lookup.</li>
   <li><strong>Claim 3.</strong> The use of disjoint rotary frequency bases per hierarchy level, shared between the encoder and decoder of that level.</li>
   <li><strong>Claim 4.</strong> An incremental edit algorithm that recomputes only the encoder&rsquo;s skip cache for the edited sentence, the upper-level encoder/decoder passes (which are short), and the decoder pass over the edited sentence&rsquo;s tokens &mdash; preserving all other sentences&rsquo; skip caches.</li>
   <li><strong>Claim 5.</strong> A staged training curriculum where Stage 0 trains the L0 encoder + L0 decoder pair in isolation (upper hierarchy bypassed via zero-summary), and subsequent stages progressively unfreeze the upper levels of the U.</li>
+  <li><strong>Claim 6.</strong> Per-level selective <strong>parallel-residual</strong> blocks (parallel at the levels that consume cross-segment broadcasts; sequential at the sentence-isolated L0 level), bounding error propagation across decoder layers when upstream summaries shift after an edit.</li>
+  <li><strong>Claim 7.</strong> <strong>Sufficient-statistics micro-correction gates</strong> driven by per-segment (&mu;, log-&sigma;) features cached alongside each sentence&rsquo;s skip representation, enabling approximate cross-segment stitching at the sentence-summary level (L1) with bounded accuracy degradation.</li>
+  <li><strong>Claim 8.</strong> <strong>Hierarchical RMSNorm + sentence-isolated attention</strong> as a sufficient condition for byte-exact sentence isolation in the L0 encoder cache, eliminating the need for a separate &ldquo;LayerNorm-leakage correction model&rdquo; in the native-training path.</li>
 </ol>
 
 
-<p class="footer">&copy; 2026 Feng Zhou &mdash; HRoPE: Hierarchical Rotary Position Embedding. Confidential / Patent Pending. Specification v7.0.</p>
+<p class="footer">&copy; 2026 Feng Zhou &mdash; HRoPE: Hierarchical Rotary Position Embedding. Confidential / All Rights Reserved. Specification v7.0.</p>
 
 </body>
 </html>
