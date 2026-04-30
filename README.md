@@ -2,6 +2,8 @@
 
 **A symmetric U-Net architecture for editable LLM inference.** Each sentence is encoded in isolation; document context flows through a separate hierarchy of summary tokens with additive skip connections — the nnU-Net pattern applied to text.
 
+**THis is just a research proposal created with AI assist,   I have not yet got time or resource to actually validate or train any models based on this idea.
+
 ## Why
 
 Standard LLMs entangle token meaning with document position, so editing one sentence in a 100k-token doc forces O(N²) recomputation. HRoPE makes a sentence's representation depend only on its own tokens; document context reaches the LM head through a separate, cheap-to-update summary stream.
@@ -35,7 +37,7 @@ L2_enc ──── bottleneck ───►   L2_dec
 
 ## Edit cost
 
-Single-sentence edit in a 100k-token doc: **~10–25 ms** vs ~5,000 ms full recompute (~300× speedup); L1 self-attn over the ~5k-sentence summary stream dominates.
+Single-sentence edit in a 100k-token doc: up to 90% reduction in recomputation for certain edit patterns possible ( I havnt tested this); L1 self-attn over the ~5k-sentence summary stream dominates.
 
 ## Files
 
