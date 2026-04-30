@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HRoPE — Unified Technical Specification (v4 → v7 consolidated)</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a2e; --accent: #2563eb; --accent2: #7c3aed;
+    --border: #e2e8f0; --code-bg: #f8fafc; --table-header: #f1f5f9;
+    --callout-bg: #eff6ff; --callout-border: #93c5fd;
+    --warn-bg: #fef3c7;  --warn-border: #fbbf24;
+    --success-bg: #ecfdf5; --success-border: #6ee7b7;
+    --new-bg: #faf5ff;   --new-border: #c084fc;
+    --proof-bg: #f0fdf4; --proof-border: #86efac;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Georgia', 'Times New Roman', serif; color: var(--fg);
+         background: var(--bg); line-height: 1.7; max-width: 920px;
+         margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 2rem; margin-bottom: 0.25em; color: var(--accent); }
+  h2 { font-size: 1.55rem; margin: 2.2em 0 0.5em; color: var(--fg);
+       border-bottom: 2px solid var(--accent); padding-bottom: 0.2em; }
+  h3 { font-size: 1.18rem; margin: 1.5em 0 0.4em; color: var(--accent2); }
+  h4 { font-size: 1rem; margin: 1.2em 0 0.3em; font-style: italic; }
+  p { margin: 0.6em 0; }
+  .subtitle { font-size: 1.05rem; color: #475569; margin-bottom: 0.5em; }
+  .meta { font-size: 0.9rem; color: #64748b; margin-bottom: 2em;
+          display: flex; gap: 2em; flex-wrap: wrap; }
+  .version-badge { background: var(--accent); color: white;
+                   padding: 2px 10px; border-radius: 12px; font-weight: bold;
+                   font-size: 0.8rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1em 0;
+          font-size: 0.92rem; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px;
+           text-align: left; vertical-align: top; }
+  th { background: var(--table-header); font-weight: 600; }
+  code { font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+         font-size: 0.88em; background: var(--code-bg);
+         padding: 1px 5px; border-radius: 3px; border: 1px solid var(--border); }
+  pre { background: var(--code-bg); border: 1px solid var(--border);
+        border-radius: 6px; padding: 16px; overflow-x: auto; margin: 1em 0;
+        font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; border: none; padding: 0; }
+  .callout { border-left: 4px solid var(--callout-border);
+             background: var(--callout-bg); padding: 12px 16px;
+             margin: 1.2em 0; border-radius: 0 6px 6px 0; }
+  .callout-warn    { border-left-color: var(--warn-border);    background: var(--warn-bg); }
+  .callout-success { border-left-color: var(--success-border); background: var(--success-bg); }
+  .callout-new     { border-left-color: var(--new-border);     background: var(--new-bg); }
+  .callout-proof   { border-left-color: var(--proof-border);   background: var(--proof-bg); }
+  .callout strong  { display: block; margin-bottom: 4px; }
+  .math { font-family: 'Cambria Math', 'Latin Modern Math', 'Georgia', serif;
+          font-style: italic; }
+  .math-block { display: block; text-align: center; margin: 1.2em auto;
+                font-size: 1.08em;
+                font-family: 'Cambria Math', 'Latin Modern Math', 'Georgia', serif;
+                font-style: italic; overflow-x: auto; max-width: 100%; }
+  .math-block-left { display: block; margin: 0.8em 0 0.8em 2em; font-size: 1.05em;
+                     font-family: 'Cambria Math', 'Latin Modern Math', 'Georgia', serif;
+                     font-style: italic; overflow-x: auto; }
+  ul, ol { margin: 0.5em 0 0.5em 1.5em; }
+  li { margin: 0.35em 0; }
+  .footer { margin-top: 4em; padding-top: 1em; border-top: 1px solid var(--border);
+            font-size: 0.85rem; color: #64748b; }
+  .ascii-diagram { font-family: 'Menlo', monospace; white-space: pre;
+                   background: var(--code-bg); border: 1px solid var(--border);
+                   border-radius: 6px; padding: 16px; overflow-x: auto;
+                   font-size: 0.82rem; line-height: 1.4; margin: 1em 0; }
+  .step-box { background: #f8fafc; border: 1px solid var(--border);
+              border-radius: 6px; padding: 14px 16px; margin: 0.8em 0; }
+  .step-box strong { color: var(--accent2); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+             margin: 1em 0; }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+  @media print { body { max-width: none; padding: 20px; font-size: 11pt; }
+                 h2 { page-break-after: avoid; }
+                 pre, table, .callout { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<h1>Hierarchical Rotary Position Embedding (HRoPE)</h1>
+<p class="subtitle">A symmetric U-Net text encoder-decoder for editable LLMs &mdash; sentence-isolated meaning, hierarchical position bands, and exact incremental edits</p>
+<div class="meta">
+  <span>&#128196; Feng Zhou &mdash; April 2026</span>
+  <span>All Rights Reserved</span>
+  <span class="version-badge">Unified Technical Specification (v4 &rarr; v7 consolidated)</span>
+</div>
+
+<div class="callout callout-new">
+  <strong>&#9889; Scope of this document</strong>
+  <p>This is the consolidated specification covering only the features that survived the v3 &rarr; v7
+  evolution and are present in the v7 reference implementation. Earlier-version-only ideas (the v3
+  monolithic 50M correction model, the v4/v5 flat-transformer assumption, ALiBi at L1/L2, and the
+  v6 single cross-attention broadcast) have been superseded and are not included.</p>
+  <p>The retained core: a hierarchical encoder-decoder with three levels (token / sentence /
+  paragraph), disjoint RoPE bands per level, sentence-isolated L0 attention, a symmetric decoder
+  path with additive skip connections at every level, and a four-component cache-stitching toolkit
+  (denominator-tracked ReLU&sup2; attention, QK-Norm, parallel residual, micro-correction gates) used
+  selectively where it matters.</p>
+</div>
+
+
+<!-- ═══════════════════════════ 1. Problem ═══════════════════════════ -->
+<h2>1. Problem Statement</h2>
+
+<p>Standard transformer LLMs entangle <em>token meaning</em> with <em>document position</em>: every key/value
+vector depends on its absolute (or relative) place in the full sequence. Editing one sentence in a
+100k-token document forces O(N&sup2;) attention recomputation across the rest of the document &mdash; several
+seconds of GPU time, unacceptable for iterative editing or long-form agent workflows.</p>
+
+<div class="callout callout-success">
+  <strong>Goal</strong>
+  <p><em>The representation of any sentence depends only on its own tokens.</em> Inter-sentence
+  relationships are carried by a separate stream of one-token-per-sentence summaries. Editing
+  sentence <em>k</em> recomputes only that sentence at L0, plus a cheap pass over the sentence-summary
+  stream at L1 (and optionally one paragraph row at L2). Document context still reaches the LM head,
+  via a symmetric decoder path that broadcasts contextualized summaries back down through skip
+  connections.</p>
+</div>
+
+
+<!-- ═══════════════════════════ 2. nnU-Net Principle ═══════════════════════════ -->
+<h2>2. The nnU-Net Architectural Principle</h2>
+
+<p>nnU-Net (Isensee et al., Nature Methods 2021) processes medical images at a hierarchy of
+resolutions: a coarse encoder captures whole-organ structure; a fine encoder captures cell-scale
+texture; skip connections from each encoder level into the matching decoder level let the decoder
+restore fine-grained detail while still using global context. Different scales answer different
+questions, and the U-shape lets every scale contribute to the final output.</p>
+
+<p>HRoPE applies the same pattern to text:</p>
+
+<div class="ascii-diagram">tokens
+  ↓
+L0_enc ──skip─────────► L0_dec → LM head
+  ↓ pool                  ↑ unpool + skip
+L1_enc ──skip─────────► L1_dec
+  ↓ pool                  ↑ unpool + skip
+L2_enc ──(bottleneck)─► L2_dec</div>
+
+<h3>2.1 Three architectural invariants</h3>
+<ol>
+  <li><strong>Sentence isolation at L0.</strong> Token-level attention is masked block-diagonally:
+  token <em>t</em> in sentence <em>s</em> can attend only to other tokens in sentence <em>s</em>. RoPE
+  positions reset to 0 at every sentence boundary. <em>The L0 representation of sentence s is
+  independent of which sentence index it occupies in the document.</em> Verified empirically:
+  the smoke test reports max diff = 0.0 in fp32 under L1/L2 reordering.</li>
+  <li><strong>Higher-level relations are tokens at upper levels.</strong> One summary token per
+  sentence is the unit of information at L1. One summary token per paragraph at L2. Standard
+  transformer machinery (causal attention + RoPE + RMSNorm + GLU) operates uniformly at every level
+  &mdash; only the sequence it operates over changes.</li>
+  <li><strong>Top-down is symmetric.</strong> The decoder is a mirror image of the encoder. Each
+  decoder level receives <code>unpool(parent_decoder) + skip_from_matching_encoder</code> and runs its
+  own transformer stack. The LM head reads only from the L0 decoder output, so document context
+  arrives via the unpool path while sentence-local detail is preserved by the skip.</li>
+</ol>
+
+<h3>2.2 Why this is the right inductive bias for editable text</h3>
+<ul>
+  <li><strong>Locality of meaning.</strong> A sentence&rsquo;s token-level interpretation is largely
+  determined by its own tokens (compositionality at the clause level). Forcing it architecturally
+  costs almost nothing on tasks where the upper-level broadcast can fill in the rest.</li>
+  <li><strong>Locality of edits.</strong> Document edits are sentence-bounded with overwhelming
+  probability: human revisions, agent rewrites, retrieval-augmented insertions all replace a span
+  that aligns with a sentence/paragraph boundary &gt;90% of the time.</li>
+  <li><strong>Cache invalidation matches the edit hierarchy.</strong> An edit at sentence <em>k</em>
+  invalidates exactly: row <em>k</em> of the L0 cache, then a re-pass of L1 (short &mdash; ~5,000
+  sentences for a 100k-token doc), and optionally one paragraph row at L2.</li>
+</ul>
+
+
+<!-- ═══════════════════════════ 3. Math foundations ═══════════════════════════ -->
+<h2>3. Mathematical Foundations</h2>
+
+<h3>3.1 RoPE recap (split layout, GPT-NeoX / Llama / Qwen)</h3>
+
+<p>For a vector <span class="math">x &isin; &Ropf;<sup>d</sup></span> with even <em>d</em>, write
+<span class="math">x = (x<sup>(1)</sup>, x<sup>(2)</sup>)</span> with
+<span class="math">x<sup>(1)</sup>, x<sup>(2)</sup> &isin; &Ropf;<sup>d/2</sup></span>. Define</p>
+
+<div class="math-block">
+RoPE(x, p) = (x<sup>(1)</sup>&odot;cos(p&theta;) &minus; x<sup>(2)</sup>&odot;sin(p&theta;),
+&ensp;&ensp; x<sup>(1)</sup>&odot;sin(p&theta;) + x<sup>(2)</sup>&odot;cos(p&theta;))
+</div>
+
+<p>This is the GPT-NeoX / Llama / Qwen layout. Frequencies follow a geometric progression
+<span class="math">&theta;<sub>i</sub> = base<sup>&minus;2i/d</sup></span>; low-index dimensions rotate
+fast (fine position differences), high-index dimensions rotate slowly (broad relationships).</p>
+
+<h3>3.2 Three properties of rotation that matter</h3>
+
+<div class="callout callout-proof">
+  <strong>P1 &mdash; Composability:</strong> R(&theta;<sub>1</sub>) R(&theta;<sub>2</sub>) =
+  R(&theta;<sub>1</sub> + &theta;<sub>2</sub>). Per-block 2D rotations satisfy the angle-addition
+  identities for sin/cos.
+</div>
+<div class="callout callout-proof">
+  <strong>P2 &mdash; Invertibility:</strong> R(&theta;)<sup>&minus;1</sup> = R(&minus;&theta;) =
+  R(&theta;)<sup>T</sup>. Rotations are orthogonal.
+</div>
+<div class="callout callout-proof">
+  <strong>P3 &mdash; Norm preservation:</strong> &Vert;R(&theta;) x&Vert;<sub>2</sub> =
+  &Vert;x&Vert;<sub>2</sub>. The reason QK-Norm composes with RoPE without destroying relative
+  position information.
+</div>
+
+<h3>3.3 Disjoint RoPE bands per hierarchy level</h3>
+
+<p>Every transformer block uses pre-norm RMSNorm + RoPE, but each level&rsquo;s blocks use a different
+rotary base. The sentence index never enters the L0 representation; it appears as a position only
+in the <em>L1 sequence of summary tokens</em>. Distinct sequences cannot alias. This is the v6 fix
+to the v3 superposed-position collision problem.</p>
+
+<div class="math-block">L0: &theta;<sup>(0)</sup><sub>i</sub> = 10000<sup>&minus;2i/d</sup>, &nbsp; positions = <em>t</em> (token offset within sentence)</div>
+<div class="math-block">L1: &theta;<sup>(1)</sup><sub>i</sub> = 1000<sup>&minus;2i/d</sup>, &nbsp; positions = &phi;<sub>s</sub> (sentence offset within paragraph)</div>
+<div class="math-block">L2: &theta;<sup>(2)</sup><sub>i</sub> = 100<sup>&minus;2i/d</sup>, &nbsp; positions = &pi;<sub>p</sub> (paragraph offset within document)</div>
+
+
+<!-- ═══════════════════════════ 4. Forward pass ═══════════════════════════ -->
+<h2>4. Forward Pass &mdash; the Whole Architecture in 30 Lines</h2>
+
+<pre><code>def forward(self, doc):
+    # ─── ENCODE (going up the hierarchy) ───────────────────────────
+    x0 = self.tok_emb(doc.token_ids)
+    for blk in self.l0_enc:
+        x0 = blk(x0, doc.token_in_sent, attn_mask=intra_sent_mask)
+    skip_l0 = x0                              # save for L0 decoder
+
+    x1 = self.sent_pool(x0, doc.sent_id, N_s)
+    for blk in self.l1_enc:
+        x1 = blk(x1, doc.sent_pos_in_para, attn_mask=causal_l1)
+    skip_l1 = x1                              # save for L1 decoder
+
+    x2 = self.para_pool(x1, doc.para_id_per_sent, N_p)
+    for blk in self.l2_enc:
+        x2 = blk(x2, doc.para_pos, attn_mask=causal_l2)
+
+    # ─── DECODE (coming back down with skips) ──────────────────────
+    y2 = x2                                   # bottleneck = top of U
+    for blk in self.l2_dec:
+        y2 = blk(y2, doc.para_pos, attn_mask=causal_l2)
+
+    y1 = unpool(y2, doc.para_id_per_sent) + skip_l1     # SKIP
+    for blk in self.l1_dec:
+        y1 = blk(y1, doc.sent_pos_in_para, attn_mask=causal_l1)
+
+    y0 = unpool(y1, doc.sent_id) + skip_l0              # SKIP
+    for blk in self.l0_dec:
+        y0 = blk(y0, doc.token_in_sent, attn_mask=intra_sent_mask)
+
+    return self.lm_head(self.head_norm(y0))</code></pre>
+
+<p><code>unpool(parent_seq, child_to_parent)[c] = parent_seq[child_to_parent[c]]</code> is a pure
+indexed gather &mdash; zero parameters, one kernel launch. It is the text equivalent of bilinear
+upsampling in image U-Nets.</p>
+
+
+<!-- ═══════════════════════════ 5. Components ═══════════════════════════ -->
+<h2>5. Components &mdash; Per Level</h2>
+
+<h3>5.1 L0: token-level encoder/decoder (sentence-isolated)</h3>
+
+<div class="step-box">
+  <strong>Mask:</strong> M[s, q, k] = 1 iff sentences agree (s<sub>q</sub> = s<sub>k</sub>) AND
+  k &le; q (causal within sentence).<br>
+  <strong>Attention:</strong> ReLU&sup2; with explicit per-row L1 denominator (&sect;6.1).<br>
+  <strong>Norm:</strong> RMSNorm pre-norm, plus QK-Norm on Q and K (&sect;6.2).<br>
+  <strong>RoPE:</strong> base 10000, positions = intra-sentence token offset <em>t</em>.
+</div>
+
+<p>Under this mask, the output for token <em>t</em> in sentence <em>s</em> is a function only of
+{x<sub>s,0</sub>, &hellip;, x<sub>s,t</sub>}. Verified bit-exactly: scrambling the document&rsquo;s
+sentence indices and paragraph positions changes the L0 output by exactly 0.0 in fp32.</p>
+
+<p>The L0 decoder uses the same intra-sentence mask. Its input for token <em>t</em> in sentence
+<em>s</em> is</p>
+
+<div class="math-block">y<sub>0</sub>[s, t] input = skip_l0[s, t] + unpool(L1_dec)[s, t]</div>
+
+<p>Both terms depend only on (a) the tokens of sentence <em>s</em> and (b) one summary vector. Edits
+to sentence <em>k</em> &ne; <em>s</em> can change L1_dec but cannot reach skip_l0[s].</p>
+
+<h3>5.2 Sentence pool (encoder &rarr; L1 input)</h3>
+
+<p>Per-sentence learnable-query attention pool produces one vector per sentence:</p>
+<div class="math-block">u<sub>s</sub> = &sum;<sub>t in S<sub>s</sub></sub> softmax<sub>t</sub>(&lt;q<sub>pool</sub>, k<sub>t</sub>&gt;) &middot; v<sub>t</sub></div>
+
+<p>The pool is differentiable through L0. It is the only place where intra-sentence content gets
+compressed for upper layers.</p>
+
+<h3>5.3 L1: sentence-level encoder/decoder</h3>
+
+<p>Standard pre-norm transformer over the sequence U = (u<sub>1</sub>, &hellip;, u<sub>N<sub>s</sub></sub>).
+Causal mask. Positions are <span class="math">&phi;<sub>s</sub></span> &mdash; the sentence&rsquo;s offset
+<em>within its paragraph</em>. This makes the L1 sub-sequence corresponding to a paragraph
+translation-invariant under paragraph reordering, which is a useful inductive bias for
+retrieval-augmented inputs.</p>
+
+<h3>5.4 Paragraph pool + L2 (optional but enabled by default)</h3>
+
+<p>Same pattern: pool L1 outputs by <code>para_id_per_sent</code> &rarr; one vector per paragraph
+&rarr; transformer over the paragraph sequence with positions <span class="math">&pi;<sub>p</sub></span>.
+The L2 stream is the bottleneck of the U.</p>
+
+<h3>5.5 Components removed during the v3&ndash;v7 evolution</h3>
+<ul>
+  <li><strong>v3 monolithic 50M correction model</strong> &mdash; eliminated by the four-component
+  toolkit (&sect;6) plus sentence isolation; the decomposable attention is exact at L0 by construction.</li>
+  <li><strong>v4 ALiBi cross-segment bias.</strong> Replaced by RoPE on per-level positions; ALiBi
+  at upper levels was directionally incorrect in v3 (B3) and unnecessary once positions live in their
+  own sequences.</li>
+  <li><strong>v6 cross-attention broadcast (<code>broadcast_l1</code>, <code>broadcast_l2</code>).</strong>
+  Replaced by the symmetric decoder + additive skip path. Skip is dense, parameter-free, and one
+  operation cheaper than the cross-attention pattern with sparse window mask.</li>
+</ul>
+
+
+<!-- ═══════════════════════════ 6. Toolkit ═══════════════════════════ -->
+<h2>6. The Cache-Stitching Robustness Toolkit (carried over from v4 / v5.1)</h2>
+
+<p>HRoPE&rsquo;s native architecture sidesteps most of the v3 LayerNorm-leakage pathologies by
+construction (RMSNorm + sentence-isolated attention &mdash; see &sect;7). The four-component toolkit
+below adds the remaining hardening for robust cross-level stitching, especially at L1/L2 where
+edits do propagate causally.</p>
+
+<h3>6.1 Component 1 &mdash; Denominator-tracked ReLU&sup2; attention</h3>
+
+<p>Replace softmax with squared ReLU and expose the per-row L1 denominator:</p>
+
+<div class="math-block">
+  &phi;(z) = max(0, z)<sup>2</sup>, &emsp;
+  Z<sub>q</sub> = &sum;<sub>k</sub> M<sub>qk</sub> &phi;(q<sup>T</sup>k), &emsp;
+  Attn(q) = &sum;<sub>k</sub> M<sub>qk</sub> &phi;(q<sup>T</sup>k) v<sub>k</sub> / (Z<sub>q</sub> + &epsilon;)
+</div>
+
+<div class="callout callout-proof">
+  <strong>Theorem &mdash; exact decomposability over key segments</strong>
+  <p>For any partition of keys into segments {S<sub>1</sub>, &hellip;, S<sub>m</sub>}, define per-segment
+  sufficient statistics</p>
+  <div class="math-block-left">
+    N<sub>j</sub>(q) = &sum;<sub>i&isin;S<sub>j</sub></sub> &phi;(q<sup>T</sup>k<sub>i</sub>) v<sub>i</sub>,
+    &emsp;
+    D<sub>j</sub>(q) = &sum;<sub>i&isin;S<sub>j</sub></sub> &phi;(q<sup>T</sup>k<sub>i</sub>).
+  </div>
+  <p>Then Attn(q, K, V) = (&sum;<sub>j</sub> N<sub>j</sub>) / (&sum;<sub>j</sub> D<sub>j</sub> + &epsilon;).
+  Combination is addition + one scalar division. <strong>No approximation.</strong> &#9632;</p>
+</div>
+
+<p>This contrasts with softmax, where the global exp-sum denominator is non-additive across
+segments. ReLU&sup2; preserves the sparsity benefits of ReLU (kills negatives) while keeping a smooth
+gradient at zero (derivative 2z, continuous), and matches softmax quality to within ~1% in
+language modeling (Google Primer).</p>
+
+<h3>6.2 Component 2 &mdash; QK-Norm (logit bounding)</h3>
+
+<p>L2-normalize Q and K before the dot product, then scale by a learned per-head temperature:</p>
+
+<div class="math-block">
+  q&#770; = q / &Vert;q&Vert;<sub>2</sub>, &emsp;
+  k&#770; = k / &Vert;k&Vert;<sub>2</sub>, &emsp;
+  score = &tau; &middot; q&#770;<sup>T</sup>k&#770;
+</div>
+
+<div class="callout callout-proof">
+  <strong>Theorem &mdash; QK-Norm preserves RoPE&rsquo;s relative-position encoding</strong>
+  <p>Let q<sub>raw</sub>, k<sub>raw</sub> be the pre-RoPE projections and q = R(p<sub>q</sub>&theta;) q<sub>raw</sub>,
+  k = R(p<sub>k</sub>&theta;) k<sub>raw</sub>. By P3, &Vert;q&Vert; = &Vert;q<sub>raw</sub>&Vert; and
+  &Vert;k&Vert; = &Vert;k<sub>raw</sub>&Vert; (position-independent). Therefore</p>
+  <div class="math-block">
+    q&#770;<sup>T</sup>k&#770; = q<sub>raw</sub><sup>T</sup> R((p<sub>k</sub>&minus;p<sub>q</sub>)&theta;) k<sub>raw</sub>
+    &ensp;/&ensp; (&Vert;q<sub>raw</sub>&Vert; &Vert;k<sub>raw</sub>&Vert;).
+  </div>
+  <p>The relative-position term R(&Delta;p &middot; &theta;) is fully preserved; only content-based
+  norms divide. &#9632;</p>
+</div>
+
+<p>QK-Norm is used at every level. Production-validated in Meta&rsquo;s Chameleon and Google&rsquo;s ViT-22B.</p>
+
+<h3>6.3 Component 3 &mdash; Parallel residual blocks (selective per level)</h3>
+
+<p>Sequential residual feeds the FFN with the post-attention state, so attention error compounds
+through the FFN at every layer. Parallel residual (PaLM, Gemma) decouples them:</p>
+
+<pre><code># Sequential                              # Parallel
+x = x + Attn(RMSNorm(x))                  h = RMSNorm(x)
+x = x + FFN(RMSNorm(x))                   x = x + α·Attn(h) + β·FFN(h)</code></pre>
+
+<p>where &alpha;, &beta; are learned per-block scalars (init 0.5 each, ~2 extra parameters per
+block). Per-layer error amplification drops from roughly (1+C)(1+L<sub>F</sub>) (sequential) to
+1 + &alpha;C + &beta;L<sub>F</sub> (parallel). With &alpha; &asymp; &beta; &asymp; 0.3,
+C &asymp; 1, L<sub>F</sub> &asymp; 1: 1.6 vs 4.0 per layer.</p>
+
+<table>
+  <thead><tr><th>Level</th><th>Default</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td>L0 encoder/decoder</td><td>OFF</td><td>Sentence-isolated; nothing to compound across the L0 stack.</td></tr>
+    <tr><td>L1 encoder/decoder</td><td>ON</td><td>Consumes cross-sentence context; bounds error if a downstream call uses approximate stitching.</td></tr>
+    <tr><td>L2 encoder/decoder</td><td>ON</td><td>Same reasoning as L1 at paragraph granularity.</td></tr>
+  </tbody>
+</table>
+
+<h3>6.4 Component 4 &mdash; Cached segment statistics &amp; micro-correction gates (opt-in)</h3>
+
+<p>For approximate cross-segment stitching at L1 (the v8 incremental-L1 path), cache lightweight
+per-segment statistics alongside each sentence&rsquo;s skip representation:</p>
+
+<div class="math-block-left">
+  &mu;<sub>s</sub><sup>(l,h)</sup> = mean<sub>i&isin;S</sub>(k<sub>i</sub><sup>(l,h)</sup>),
+  &emsp;
+  log&sigma;<sub>s</sub><sup>(l,h)</sup> = log std<sub>i&isin;S</sub>(k<sub>i</sub><sup>(l,h)</sup>).
+</div>
+
+<p><strong>Storage:</strong> for a 32-layer, 32-head, d<sub>head</sub>=128 model:
+2 vectors &times; 32 layers &times; 32 heads &times; 128 dims &times; 2 bytes (bf16) = ~0.5 MB per
+segment. Negligible vs the segment&rsquo;s KV cache (50&ndash;200 MB).</p>
+
+<p>At stitch time, a small gate consumes pairwise (&Delta;&mu;, &Delta;log&sigma;) features and produces
+a per-head sigmoid that scales the attention output. Two variants:</p>
+
+<table>
+  <thead><tr><th></th><th>Scalar gate (default)</th><th>Vector gate</th></tr></thead>
+  <tbody>
+    <tr><td>Output</td><td>One scalar per head per layer</td><td>One vector &isin; &Ropf;<sup>d<sub>head</sub></sup> per head per layer</td></tr>
+    <tr><td>Total params (32 layers)</td><td>~260K</td><td>~33M</td></tr>
+    <tr><td>Init</td><td>Zero weights &rArr; sigmoid(0) = 0.5 (identity-like at init, multiplicative bias absorbed by W<sub>o</sub>)</td><td>Same</td></tr>
+    <tr><td>When to enable</td><td>v8 approximate-L1 path</td><td>If accuracy gap with scalar gate exceeds ~0.5%</td></tr>
+  </tbody>
+</table>
+
+<p>Default in v7: gate is wired and zero-initialised (identity at init), but disabled, because the
+v7 editor does an <em>exact</em> L1 re-pass and there is no residual drift to correct. The gate is
+the parameter machinery a future v8 incremental-L1 editor needs.</p>
+
+
+<!-- ═══════════════════════════ 7. Why no LN leakage ═══════════════════════════ -->
+<h2>7. Why the v3 LayerNorm-Leakage Scenario Doesn&rsquo;t Apply Natively</h2>
+
+<p>The v3/v4 LayerNorm-leakage concern was framed for <strong>Path 1 retrofit</strong>: take an
+existing Llama-3 / Qwen model trained with full softmax attention and try to swap in cache stitching
+at inference. In that setting, hidden-state distributions drift away from what the model expects, and
+a correction model (or micro-gates) is needed to compensate.</p>
+
+<p>HRoPE&rsquo;s native path (Path 2) sidesteps this at the L0 layer by construction:</p>
+<ol>
+  <li><strong>RMSNorm, not LayerNorm.</strong> RMSNorm has no mean-subtraction step; it normalises
+  each per-token vector by its own L2 magnitude only. There is no cross-token statistic, so an edit
+  at sentence <em>k</em> cannot shift sentence <em>j</em>&rsquo;s normalised representation through a
+  shared mean.</li>
+  <li><strong>Sentence isolation enforced by mask.</strong> The L0 attention mask is block-diagonal at
+  sentence boundaries; sentence <em>k</em>&rsquo;s tokens never enter sentence <em>j</em>&rsquo;s key/query/value
+  computation through any path.</li>
+  <li><strong>Train/inference parity.</strong> The model is trained with this exact masking. The
+  hidden states the L0 encoder produces under stitched inputs are the same it would produce under a
+  fresh full-document forward, because the only thing the L0 encoder ever sees during training is
+  sentence-isolated context.</li>
+</ol>
+
+<p>Where stitching effects do appear &mdash; L1 self-attention (causal across sentences) and the L0
+decoder broadcast input &mdash; the v7 editor handles them with an exact re-pass at L1/L2 and trained
+robustness in Stage 3 of the curriculum. The four-component toolkit (&sect;6) is opt-in for downstream
+approximate-stitching paths.</p>
+
+
+<!-- ═══════════════════════════ 8. Edit cost ═══════════════════════════ -->
+<h2>8. Incremental Edit Cost</h2>
+
+<p>Edit a single sentence <em>k</em> on a 100k-token document (~5,000 sentences, ~250 paragraphs):</p>
+
+<table>
+  <thead><tr><th>Step</th><th>What runs</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>L0_enc on sentence <em>k</em> only (intra-sentence causal)</td><td>O(L<sub>k</sub><sup>2</sup>) &mdash; tens of &micro;s</td></tr>
+    <tr><td>2</td><td>Splice <code>skip_l0[k]</code> into cache</td><td>O(L<sub>k</sub>)</td></tr>
+    <tr><td>3</td><td>Re-pool sentence <em>k</em>; re-run L1_enc over the spliced sentence stream</td><td>O(N<sub>s</sub> &middot; d &middot; n_l1_enc) &asymp; few ms</td></tr>
+    <tr><td>4</td><td>Re-pool affected paragraph; re-run L2_enc</td><td>O(N<sub>p</sub> &middot; d) &asymp; sub-ms</td></tr>
+    <tr><td>5</td><td>Run L2_dec, L1_dec (full)</td><td>~10 ms (sentence stream)</td></tr>
+    <tr><td>6</td><td>L0_dec on <em>k</em>&rsquo;s tokens (intra-sentence)</td><td>tens of &micro;s</td></tr>
+    <tr><td>7</td><td>LM head on <em>k</em>&rsquo;s tokens</td><td>negligible</td></tr>
+    <tr style="background: #f0fdf4;"><td><strong>Total</strong></td><td></td><td><strong>~10&minus;25 ms vs ~5,000 ms full recompute</strong></td></tr>
+  </tbody>
+</table>
+
+<p>The L0_dec for non-edited sentences <em>k</em>+1 &hellip; <em>N<sub>s</sub></em>&minus;1 is
+technically also affected (their L1_dec broadcast vector changed because L1 attention is causal). For
+the standard editor flow &mdash; where you only need correct logits at the cursor &mdash; you skip those.
+For a full re-decode of the document tail, add ~5&minus;10 ms more.</p>
+
+
+<!-- ═══════════════════════════ 9. SimHash ═══════════════════════════ -->
+<h2>9. Sentence-Level Fuzzy Cache (SimHash with character n-grams)</h2>
+
+<p>To recognise &ldquo;edits&rdquo; that are textually near-identical to a previously cached sentence (e.g. agent
+re-typing the same line, retrieval re-fetching a near-duplicate), HRoPE uses SimHash over <strong>character n-grams (n = 3 default)</strong>
+rather than whitespace tokens. This is the v6 fix to v3&rsquo;s
+whitespace-only featurisation, which failed on Chinese / Japanese / Thai / any language without
+whitespace.</p>
+
+<pre><code>def simhash(sentence, hash_bits=64, n=3):
+    grams = [sentence[i:i+n] for i in range(len(sentence) - n + 1)]
+    v = [0] * hash_bits
+    for g in grams:
+        h = int.from_bytes(hashlib.md5(g.encode()).digest(), 'big')
+        for i in range(hash_bits):
+            v[i] += 1 if (h >> i) & 1 else -1
+    return sum((1 << i) for i in range(hash_bits) if v[i] > 0)
+
+# Cache lookup: query for entries with Hamming distance ≤ 3 bits.
+# If hit -> reuse cached skip_l0; no re-encode needed.</code></pre>
+
+
+<!-- ═══════════════════════════ 10. Errata ═══════════════════════════ -->
+<h2>10. Errata Carried Forward (v3 PDF Bug Fixes)</h2>
+
+<table>
+  <thead><tr><th>#</th><th>v3 location</th><th>Bug</th><th>Fix (in this spec)</th></tr></thead>
+  <tbody>
+    <tr><td>B1</td><td>&sect;4.1 ReLU formula</td><td>Sequence-wide denominator presented as &ldquo;additive without normalization&rdquo; &mdash; self-contradictory.</td><td>Denominator-tracked ReLU&sup2; with per-row L1 denominator (&sect;6.1).</td></tr>
+    <tr><td>B2</td><td>&sect;6 RoPE Triton kernel</td><td>Used interleaved layout; incompatible with all modern checkpoints.</td><td>GPT-NeoX split layout in both kernel and PyTorch <code>HierarchicalRoPE</code>.</td></tr>
+    <tr><td>B3</td><td>&sect;5.2 ALiBi formula</td><td>Used |seg<sub>i</sub>&minus;seg<sub>j</sub>|; symmetric, breaks causal masking.</td><td>ALiBi dropped at L1/L2; RoPE on sentence/paragraph indices is sufficient. Causal masking explicit in the reference.</td></tr>
+    <tr><td>B4</td><td>&sect;5 hierarchical position</td><td>&Theta;(p) = &alpha;<sub>sent</sub>i + &alpha;<sub>token</sub>j collides for any &alpha; choice.</td><td>Disjoint frequency bands per level (&sect;3.3); positions live in distinct sequences and cannot alias.</td></tr>
+    <tr><td>B5</td><td>&sect;7 SimHash</td><td><code>sentence.lower().split()</code> fails on whitespace-free languages.</td><td>Character n-grams (&sect;9).</td></tr>
+    <tr><td>B6</td><td>&sect;4.2 Correction model</td><td>Only K corrected; <code>context_stats</code> referenced but undefined.</td><td>Correction model removed entirely. Sentence isolation makes L0 stitching positions local by construction; cross-sentence interactions live at L1 where they are computed exactly. Optional micro-gates (&sect;6.4) for the v8 approximate-L1 path.</td></tr>
+    <tr><td>B7</td><td>&sect;4.3 Fine-tuning</td><td>Claimed softmax&rarr;ReLU swap converges in 6,000 steps; activation distributions differ by orders of magnitude.</td><td>Native path budgets full pre-training (Stages 0&ndash;3, &sect;11). The retrofit path is no longer on the critical path.</td></tr>
+    <tr><td>B8</td><td>&sect;5 notation</td><td><em>i, j</em> reused for (sentence, token) and (query, key).</td><td>Disambiguated: (s, t) for (sentence, token-in-sentence), p for paragraph, (q, k) for query/key.</td></tr>
+    <tr><td>B9</td><td>&sect;5.1 isolation gap</td><td>If &alpha;<sub>sent</sub>=0, sentence index is missing from L0 representation but still referenced for retrieval.</td><td>&alpha;<sub>sent</sub>=0 is the only setting at L0; sentence index is materialised as a position in the L1 sequence of summary tokens. Retrieval uses sentence-summary similarity at L1.</td></tr>
+    <tr><td>B10</td><td>&sect;13 nnU-Net analogy</td><td>Mentioned but never implemented; v3&rsquo;s actual architecture is a flat transformer with a clever cache.</td><td>Implemented literally: separate encoders per level with their own RoPE bands, downsampling by attention pooling, upsampling by indexed gather, U-Net-style additive skip connections from each encoder level to its matching decoder level (&sect;2 and &sect;4).</td></tr>
+  </tbody>
+</table>
+
+
+<!-- ═══════════════════════════ 11. Training ═══════════════════════════ -->
+<h2>11. Native Training Recipe (Path 2)</h2>
+
+<h3>11.1 Staged curriculum</h3>
+
+<table>
+  <thead><tr><th>Stage</th><th>Trainable</th><th>Frozen</th><th>Loss</th><th>Steps (1.5B)</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>0</td>
+      <td>tok_emb, L0 enc + L0 dec, lm_head</td>
+      <td>L1, sent_pool, L2, para_pool, all decoder upper-levels (skip_l1 = 0 bypass)</td>
+      <td>Sentence-internal next-token CE (mask cross-sentence pairs)</td>
+      <td>20k</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>+ sent_pool + L1_enc + L1_dec</td>
+      <td>L2 stack</td>
+      <td>Document next-token CE + 0.05 &middot; sentence-summary diversity (off-diagonal cosine penalty)</td>
+      <td>30k</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>+ para_pool + L2_enc + L2_dec</td>
+      <td>none</td>
+      <td>Document next-token CE; document length grows from 4 to 64 paragraphs</td>
+      <td>30k</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>all</td>
+      <td>none</td>
+      <td>Document next-token CE under stitch perturbations (random sentence reorders inside paragraphs, 10% paragraph drop, 10% retrieval-style sentence replacement)</td>
+      <td>10k</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Stage 0 forward.</strong> Sets skip_l1 = 0, so unpool(L1_dec) = 0 and the L0 encoder + L0
+decoder pair train on intra-sentence next-token loss in isolation:</p>
+
+<pre><code>def stage0_forward(model, doc):
+    x0 = model.tok_emb(doc.token_ids)
+    for blk in model.l0_enc: x0 = blk(x0, doc.token_in_sent, mask=intra)
+    skip_l0 = x0
+    y0 = skip_l0                              # bypass: unpool(L1_dec) = 0
+    for blk in model.l0_dec: y0 = blk(y0, doc.token_in_sent, mask=intra)
+    return model.lm_head(model.head_norm(y0))</code></pre>
+
+<h3>11.2 Hyperparameters (1.5B reference config)</h3>
+<table>
+  <tbody>
+    <tr><td>d_model</td><td>2048</td></tr>
+    <tr><td>n_heads</td><td>16</td></tr>
+    <tr><td>L0 enc / L0 dec</td><td>16 / 16 layers</td></tr>
+    <tr><td>L1 enc / L1 dec</td><td>6 / 6 layers</td></tr>
+    <tr><td>L2 enc / L2 dec</td><td>2 / 2 layers</td></tr>
+    <tr><td>FFN multiplier</td><td>4 (SwiGLU)</td></tr>
+    <tr><td>Parallel residual</td><td>OFF at L0; ON at L1/L2 (&sect;6.3)</td></tr>
+    <tr><td>Micro-correction gate</td><td>Wired, zero-init, OFF until v8 approximate-L1 path</td></tr>
+    <tr><td>Max tokens / sentence</td><td>256</td></tr>
+    <tr><td>Max sentences / document</td><td>8192</td></tr>
+    <tr><td>Max paragraphs / document</td><td>512</td></tr>
+    <tr><td>Optimizer</td><td>AdamW &beta; = (0.9, 0.95), wd = 0.1, lr = 3&times;10<sup>&minus;4</sup> cosine to 3&times;10<sup>&minus;5</sup></td></tr>
+    <tr><td>Warmup steps</td><td>2,000</td></tr>
+    <tr><td>Grad clip</td><td>1.0 (global norm)</td></tr>
+    <tr><td>Temperature &tau; init</td><td>&radic;d<sub>head</sub> per head</td></tr>
+    <tr><td>Parallel residual &alpha;, &beta; init</td><td>0.5 each</td></tr>
+    <tr><td>Sequence length schedule</td><td>512 &rarr; 2K &rarr; 8K &rarr; 32K+</td></tr>
+    <tr><td>Tokens trained</td><td>~150B (4&times; Chinchilla-optimal for 1.5B)</td></tr>
+    <tr><td>Hardware</td><td>32&times;H100 (Stage 0+1) &rarr; 64&times;H100 (Stage 2+3)</td></tr>
+    <tr><td>Wall time / cost</td><td>~14 days end-to-end / ~$60K cloud</td></tr>
+  </tbody>
+</table>
+
+<h3>11.3 Data preparation</h3>
+<ol>
+  <li>Sentence segmentation: spaCy <code>en_core_web_sm</code> (English) + <code>jieba</code> (zh) +
+  <code>SudachiPy</code> (ja). Per-language pipeline; never split inside code blocks or LaTeX.</li>
+  <li>Paragraph detection: blank-line boundaries in text, header-level boundaries in markdown.</li>
+  <li>Cap sentence length at 256 tokens; longer sentences hard-split at the comma boundary closest to the cap.</li>
+  <li>Cap paragraphs at 64 sentences; longer paragraphs split at the sentence boundary closest to the cap.</li>
+  <li>Documents up to 64 paragraphs (~32k&minus;65k tokens) used unmodified; longer ones sliced into overlapping windows of 32 paragraphs with 4-paragraph overlap.</li>
+</ol>
+
+<h3>11.4 Stage 3 perturbations</h3>
+<ul>
+  <li>Probability 0.2: permute the sentence-summary stream within each paragraph.</li>
+  <li>Probability 0.1: drop one paragraph entirely (zero out its summary).</li>
+  <li>Probability 0.1: replace one sentence&rsquo;s tokens with a random sentence from a different document and recompute its L0 embedding (simulates retrieval-augmented insertion).</li>
+</ul>
+
+<p>Stage 3 is the cheapest stage (~7% of total) but it is what makes the final model robust to the
+inference-time edit workload.</p>
+
+
+<!-- ═══════════════════════════ 12. Reference impl ═══════════════════════════ -->
+<h2>12. Reference Implementation</h2>
+
+<table>
+  <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>hrope_v7_reference.py</code></td><td>Symmetric U-Net model + incremental editor + <code>compute_seg_stats</code> helper + smoke test (verifies sentence isolation, skip wiring, edit isolation, parallel-residual, micro-gate identity-init).</td></tr>
+    <tr><td><code>hrope_v7_train.py</code></td><td>Staged curriculum (Stage 0 via <code>stage0_forward</code>; 1+: full U; 3: stitch-perturb).</td></tr>
+    <tr><td><code>hrope_v6_reference.py</code></td><td>Earlier reference (asymmetric: encoder + single cross-attention broadcast). Kept for ablation comparison.</td></tr>
+    <tr><td><code>hrope_v6_train.py</code></td><td>Same staged curriculum at the v6 architectural level.</td></tr>
+  </tbody>
+</table>
+
+<h3>12.1 Verified properties (v7 smoke test)</h3>
+
+<pre><code>$ python hrope_v7_reference.py --smoke
+[smoke] params: 539,208                                            # +8 vs v7.0 (alpha,beta scalars)
+[smoke] L0 ENCODER invariance under L1/L2 reordering: 0.0000e+00   # sentence isolation
+[smoke] L0 DECODER differs under reordering: 1.0783e+00            # decoder uses doc context
+[smoke] zeroing skip_l0 changes decoder output by 4.6838e+00       # skip wired
+[smoke] non-edited sentences&rsquo; skip_l0 unchanged: 0.0000e+00       # edit isolation
+[smoke] sequential-residual variant runs: logits (1, 48, 1000)     # parallel-residual flag works
+[smoke] micro-gate identity-init: y0 diff vs no-gate = 0.0000e+00  # gate is identity at init
+[smoke] seg_stats shape: (1, 4, 6, 32) (expected (1, 4, 6, 32))    # stats helper correct
+[smoke] OK</code></pre>
+
+<p>The 0.0e+00 lines are the empirical confirmation of the architectural invariants:
+sentence-isolation at L0 (line 2), the skip path being load-bearing (line 4), edit-locality of
+skip_l0 (line 5), and gate identity at init (line 7).</p>
+
+
+<!-- ═══════════════════════════ 13. Performance ═══════════════════════════ -->
+<h2>13. Performance Projections</h2>
+
+<table>
+  <thead><tr>
+    <th>Scenario</th><th>Standard transformer</th><th>KVLink</th><th>HRoPE native (v7)</th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td>100k tokens, 1-sentence mid-document edit</td>
+      <td>~5 s</td>
+      <td>~0.5&minus;1 s</td>
+      <td><strong>~10&minus;25 ms</strong> (L1 self-attn dominates)</td>
+    </tr>
+    <tr>
+      <td>Accuracy vs full-recompute upper bound</td>
+      <td>0% drop (definitionally)</td>
+      <td>~2&minus;5%</td>
+      <td>0% (exact &mdash; isolation is enforced; v7 editor does exact L1 re-pass)</td>
+    </tr>
+    <tr>
+      <td>Cache hit rate on iterative edits</td>
+      <td>0%</td>
+      <td>85&minus;95%</td>
+      <td>~99% (only edited sentences invalidate)</td>
+    </tr>
+    <tr>
+      <td>Native context length</td>
+      <td>32&minus;128k</td>
+      <td>32&minus;128k</td>
+      <td>~1M tokens (L0 only sees one sentence; total bound is L1 stack memory)</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout callout-warn">
+  <strong>Honest caveats</strong>
+  <ul style="margin: 0.4em 0 0 1.2em;">
+    <li>The 0% accuracy drop relative to a full-recompute upper bound is a property of the
+    architecture, not of the trained model&rsquo;s quality. A v7 model will measure differently against
+    a frontier dense-attention model on raw next-token loss because the inductive bias (sentence
+    isolation at L0) costs some capacity. The relevant benchmark is &ldquo;v7 native vs an equivalently-sized
+    dense transformer trained on the same tokens.&rdquo; That comparison is the open empirical
+    question (see &sect;14).</li>
+    <li>The ~5 s standard baseline assumes <em>no prefix caching</em>. Modern serving stacks
+    (vLLM, SGLang, TGI) with prefix caching already handle append-only edits efficiently.
+    HRoPE&rsquo;s differentiation is on <em>mid-document</em> edits (insert/delete/replace in the middle),
+    where prefix caching cannot help.</li>
+  </ul>
+</div>
+
+
+<!-- ═══════════════════════════ 14. Feasibility ═══════════════════════════ -->
+<h2>14. Feasibility &amp; Risks</h2>
+
+<h3>14.1 What is unambiguously sound</h3>
+<ul>
+  <li><strong>Architecture compiles, runs, and respects its invariants.</strong> The reference
+  produces L0 invariance &equiv; 0.0 empirically.</li>
+  <li><strong>RoPE math is exact.</strong> Composability and norm preservation are textbook facts;
+  the only thing v3 got wrong was the layout (interleaved vs split), which is fixed.</li>
+  <li><strong>Edit cost is dominated by L1 self-attention</strong> (5&minus;15 ms for 5k sentences).
+  Straightforward arithmetic, matches measurements of similarly-sized transformers.</li>
+  <li><strong>Errata fixes are mechanical.</strong> All ten v3 bugs (B1&ndash;B10) are reproducible
+  with unambiguous fixes (&sect;10).</li>
+</ul>
+
+<h3>14.2 What is unproven (and how to prove it)</h3>
+<ul>
+  <li><strong>Quality on next-token loss vs equivalently sized dense transformer.</strong> The
+  sentence-isolation prior is a constraint; it could cost &gt;1 point of perplexity at scale.
+  <em>De-risk:</em> 350M ablation v7 vs 350M dense on same 30B tokens (~$5K, ~3 days, 8&times;H100).
+  If within ~5% of dense PPL, scale up.</li>
+  <li><strong>Sentence-summary capacity.</strong> One vector per sentence may not be enough for
+  long or technical sentences. <em>De-risk:</em> pool to k summary tokens per sentence (k = 1, 2, 4)
+  and pick the smallest k that closes the gap. Reference&rsquo;s <code>AttentionPool</code> can be
+  parameterised for this with ~5 lines of change.</li>
+  <li><strong>L1 self-attention bottleneck on incremental edits.</strong> 5&minus;15 ms is fine for
+  human-in-the-loop editing but could matter for high-QPS agent workloads. <em>De-risk:</em>
+  approximate L1 stitching using the cached statistics + micro-correction gates (the v8 path; the
+  parameter machinery already ships in v7.1).</li>
+  <li><strong>Stage 0 actually learns useful sentence representations.</strong> Forcing L0 to predict
+  next-token from intra-sentence context only is a strong constraint. <em>De-risk:</em> add an
+  auxiliary span-corruption loss at L0 to sidestep the &ldquo;first token has no context&rdquo;
+  degeneracy.</li>
+</ul>
+
+<h3>14.3 Risk register</h3>
+<table>
+  <thead><tr><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>L0-only stage 0 is degenerate (loss plateaus)</td><td>Medium</td><td>Medium</td><td>Add MLM auxiliary; or skip stage 0 and start joint at stage 1.</td></tr>
+    <tr><td>Sentence pool throws away signal that L1 needs</td><td>Medium</td><td>High</td><td>Pool to k summary tokens; ablate k.</td></tr>
+    <tr><td>L1 self-attention is the bottleneck on edits</td><td>Low</td><td>Medium</td><td>Sliding-window L1; or v8 approximate stitching with micro-gates.</td></tr>
+    <tr><td>Disjoint RoPE bands aren&rsquo;t actually disjoint at finite precision</td><td>Low</td><td>Low</td><td>Bases differ by 10&times;; collisions only at &gt;1M positions, and our levels never see &gt;~5k positions in their own sequence.</td></tr>
+    <tr><td>Sentence segmenter errors propagate to L0 boundaries</td><td>High</td><td>Low</td><td>Stage 3 with random sentence-boundary jitter; segmenter need not be perfect.</td></tr>
+  </tbody>
+</table>
+
+<h3>14.4 Verdict</h3>
+<div class="callout callout-success">
+  <strong>Feasibility: HIGH for the architecture, MEDIUM for the quality bet.</strong>
+  <p>The architecture is buildable today, the math is correct, and the reference runs. The
+  unknown is whether the inductive bias costs more in language-model quality than it gains in edit
+  efficiency. A 350M-parameter ablation against a dense baseline is the single experiment that
+  decides this; it costs ~$5K and ~3 days. <em>Do that experiment first, before committing to the
+  1.5B run.</em></p>
+</div>
+
+
+<!-- ═══════════════════════════ 15. Roadmap ═══════════════════════════ -->
+<h2>15. Roadmap</h2>
+<ol>
+  <li><strong>Week 1.</strong> 350M ablation: v7 (symmetric U) vs v6 (asymmetric, single broadcast)
+  vs dense baseline on the same 30B tokens. Hypothesis: v7&rsquo;s symmetric U closes 50&minus;70%
+  of the gap to dense, primarily because the L0 skip preserves high-frequency detail at the LM head.
+  Decision gate.</li>
+  <li><strong>Week 2&ndash;3.</strong> If green, run 1.5B Stage 0 + Stage 1 on 32&times;H100 (~$25K).</li>
+  <li><strong>Week 4&ndash;5.</strong> Stage 2 + Stage 3 on 64&times;H100 (~$35K).</li>
+  <li><strong>Week 6.</strong> Benchmark suite: LongBench, NIAH-128k, edit-throughput micro-bench.</li>
+  <li><strong>Week 7.</strong> Triton kernel for unpool + add fused with the first L0_dec attention
+  (saves a memory round-trip).</li>
+  <li><strong>Week 8.</strong> Stage 4 stitch-aware fine-tune: train with parallel residual + micro
+  gates active and (&mu;, log-&sigma;) statistics flowing through, so the model learns to USE the
+  gate when downstream calls perform approximate L1 stitching.</li>
+  <li><strong>v8.</strong> Incremental-L1 editor: replace the exact L1 re-pass with an approximate
+  stitch using cached segment statistics + the trained gates. Target sub-millisecond edit cost on
+  100k-token docs.</li>
+</ol>
+
+
+<p class="footer">&copy; 2026 Feng Zhou &mdash; HRoPE: Hierarchical Rotary Position Embedding.
+Confidential / All Rights Reserved. Unified Specification consolidating v4 &rarr; v7.</p>
+
+</body>
+</html>
