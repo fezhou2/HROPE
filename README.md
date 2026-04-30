@@ -2,7 +2,7 @@
 
 **A symmetric U-Net architecture for editable LLM inference.** Each sentence is encoded in isolation; document context flows through a separate hierarchy of summary tokens with additive skip connections — the nnU-Net pattern applied to text.
 
-**THis is just a research proposal created with AI assist,   I have not yet got time or resource to actually validate or train any models based on this idea.
+This is just a research proposal created with AI assist,   I have not yet got time or resource to actually validate or train any models based on this idea.
 
 ## Why
 
