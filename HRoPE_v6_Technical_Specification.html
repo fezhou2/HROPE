@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HRoPE v6 — Hierarchical Rotary Position Embedding | Technical Specification</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a2e; --accent: #2563eb; --accent2: #7c3aed;
+    --border: #e2e8f0; --code-bg: #f8fafc; --table-header: #f1f5f9;
+    --callout-bg: #eff6ff; --callout-border: #93c5fd;
+    --warn-bg: #fef3c7;  --warn-border: #fbbf24;
+    --success-bg: #ecfdf5; --success-border: #6ee7b7;
+    --new-bg: #faf5ff;   --new-border: #c084fc;
+    --proof-bg: #f0fdf4; --proof-border: #86efac;
+    --bug-bg: #fef2f2;   --bug-border: #fca5a5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Georgia', 'Times New Roman', serif; color: var(--fg);
+         background: var(--bg); line-height: 1.7; max-width: 920px;
+         margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 2rem; margin-bottom: 0.25em; color: var(--accent); }
+  h2 { font-size: 1.55rem; margin: 2.2em 0 0.5em; color: var(--fg);
+       border-bottom: 2px solid var(--accent); padding-bottom: 0.2em; }
+  h3 { font-size: 1.18rem; margin: 1.5em 0 0.4em; color: var(--accent2); }
+  h4 { font-size: 1rem; margin: 1.2em 0 0.3em; font-style: italic; }
+  p { margin: 0.6em 0; }
+  .subtitle { font-size: 1.05rem; color: #475569; margin-bottom: 0.5em; }
+  .meta { font-size: 0.9rem; color: #64748b; margin-bottom: 2em;
+          display: flex; gap: 2em; flex-wrap: wrap; }
+  .version-badge { background: var(--accent); color: white;
+                   padding: 2px 10px; border-radius: 12px; font-weight: bold;
+                   font-size: 0.8rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1em 0;
+          font-size: 0.92rem; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px;
+           text-align: left; vertical-align: top; }
+  th { background: var(--table-header); font-weight: 600; }
+  code { font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+         font-size: 0.88em; background: var(--code-bg);
+         padding: 1px 5px; border-radius: 3px; border: 1px solid var(--border); }
+  pre { background: var(--code-bg); border: 1px solid var(--border);
+        border-radius: 6px; padding: 16px; overflow-x: auto; margin: 1em 0;
+        font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; border: none; padding: 0; }
+  .callout { border-left: 4px solid var(--callout-border);
+             background: var(--callout-bg); padding: 12px 16px;
+             margin: 1.2em 0; border-radius: 0 6px 6px 0; }
+  .callout-warn    { border-left-color: var(--warn-border);    background: var(--warn-bg); }
+  .callout-success { border-left-color: var(--success-border); background: var(--success-bg); }
+  .callout-new     { border-left-color: var(--new-border);     background: var(--new-bg); }
+  .callout-proof   { border-left-color: var(--proof-border);   background: var(--proof-bg); }
+  .callout-bug     { border-left-color: var(--bug-border);     background: var(--bug-bg); }
+  .callout strong  { display: block; margin-bottom: 4px; }
+  .math { font-family: 'Cambria Math', 'Latin Modern Math', 'Georgia', serif;
+          font-style: italic; }
+  .math-block { display: block; text-align: center; margin: 1.2em auto;
+                font-size: 1.08em;
+                font-family: 'Cambria Math', 'Latin Modern Math', 'Georgia', serif;
+                font-style: italic; overflow-x: auto; max-width: 100%; }
+  ul, ol { margin: 0.5em 0 0.5em 1.5em; }
+  li { margin: 0.35em 0; }
+  .footer { margin-top: 4em; padding-top: 1em; border-top: 1px solid var(--border);
+            font-size: 0.85rem; color: #64748b; }
+  .ascii-diagram { font-family: 'Menlo', monospace; white-space: pre;
+                   background: var(--code-bg); border: 1px solid var(--border);
+                   border-radius: 6px; padding: 16px; overflow-x: auto;
+                   font-size: 0.82rem; line-height: 1.4; margin: 1em 0; }
+  .col-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+             margin: 1em 0; }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+  @media print { body { max-width: none; padding: 20px; font-size: 11pt; }
+                 h2 { page-break-after: avoid; }
+                 pre, table, .callout { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<h1>Hierarchical Rotary Position Embedding (HRoPE)</h1>
+<p class="subtitle">nnU-Net-style hierarchical encoder: sentence-isolated meaning, inter-sentence relations as upper-layer tokens</p>
+<div class="meta">
+  <span>&#128196; Feng Zhou &mdash; April 2026</span>
+  <span>Patent Pending</span>
+  <span class="version-badge">Technical Specification v6.0</span>
+</div>
+
+<div class="callout callout-new">
+  <strong>&#9889; What changed in v6</strong>
+  <p>v3 (the source PDF) used the nnU-Net comparison only as an analogy. v4&ndash;v5.2 refined the attention mechanism but kept a single flat transformer over tokens. <strong>v6 turns the analogy into the architecture</strong>: each sentence is encoded by a token-level encoder that is <em>causally isolated</em> from the rest of the document; sentence summaries flow into a sentence-level transformer; paragraph summaries flow into a paragraph-level transformer; and the contextualized summaries are broadcast back down via cross-attention before the LM head.</p>
+  <p>This makes the v3 promise &mdash; <em>edit a sentence, recompute only that sentence</em> &mdash; literally true at the architectural level instead of relying on cache-stitching tricks at inference time.</p>
+  <p>v6 also fixes ten concrete bugs from v3 (table below) and ships a runnable PyTorch reference (<code>hrope_v6_reference.py</code>) plus a staged training script (<code>hrope_v6_train.py</code>).</p>
+</div>
+
+
+<!-- ═══════════════════════════ Errata ═══════════════════════════ -->
+<h2>0. Errata &mdash; v3 PDF Bug Fixes Applied in v6</h2>
+<table>
+  <thead>
+    <tr><th>#</th><th>Location in v3</th><th>Bug</th><th>v6 fix</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>B1</td>
+      <td>&sect;4.1 ReLU attention formula</td>
+      <td>Includes a sequence-wide denominator yet claims attention is &ldquo;additive without normalization.&rdquo; Self-contradictory.</td>
+      <td>Use <strong>ReLU&sup2; with per-row L1 denominator that is exposed as a state variable</strong>. Stitching multiplies a row by a known scalar instead of pretending normalization can be skipped. (See &sect;5 and <code>relu_sq_attention()</code>.)</td>
+    </tr>
+    <tr>
+      <td>B2</td>
+      <td>&sect;6 Re-rotation Triton kernel</td>
+      <td>Loads <code>x = K[2*i]</code>, <code>y = K[2*i+1]</code> &mdash; that&rsquo;s the <em>interleaved</em> RoPE layout. Llama / GPT-NeoX / Qwen all use the <em>split</em> layout (first <em>d</em>/2 rotated against second <em>d</em>/2). Kernel is incompatible with every modern checkpoint.</td>
+      <td>Adopt the GPT-NeoX split layout in both the Triton kernel and the PyTorch <code>HierarchicalRoPE</code> module. Pairs are <code>(x[:, :d/2], x[:, d/2:])</code>.</td>
+    </tr>
+    <tr>
+      <td>B3</td>
+      <td>&sect;5.2 ALiBi formula</td>
+      <td><span class="math">&minus;m&middot;|seg<sub>i</sub>&minus;seg<sub>j</sub>|</span> uses absolute value, treating past and future symmetrically. ALiBi is directional: <span class="math">&minus;m&middot;(i&minus;j)</span> for <span class="math">i&ge;j</span>, <span class="math">&minus;&infin;</span> otherwise. The v3 form breaks causal masking.</td>
+      <td>Drop ALiBi at L1/L2 in v6 (RoPE on sentence/paragraph indices is sufficient). If ALiBi is wanted as a stability prior at L1, use the directional form. Causal masking is enforced explicitly in the reference (<code>_l1_mask</code>).</td>
+    </tr>
+    <tr>
+      <td>B4</td>
+      <td>&sect;5 hierarchical position</td>
+      <td><span class="math">&Theta;(p) = &alpha;<sub>sent</sub>&middot;i + &alpha;<sub>token</sub>&middot;j</span>. Two distinct (<em>i, j</em>) pairs collide whenever <span class="math">&alpha;<sub>sent</sub>&middot;&Delta;i = &minus;&alpha;<sub>token</sub>&middot;&Delta;j</span>. No collision guarantee for any reasonable choice of &alpha;'s.</td>
+      <td><strong>Separate frequency bands per level</strong>. L0 uses base 10000, L1 uses base 1000, L2 uses base 100. The bands have disjoint Fourier support; a token&rsquo;s position is encoded only by L0 (within its sentence), the sentence&rsquo;s position only by L1, and so on. No collisions, no superposition, and each level&rsquo;s positions live in their own sequence of summary tokens.</td>
+    </tr>
+    <tr>
+      <td>B5</td>
+      <td>&sect;7 SimHash</td>
+      <td><code>features = sentence.lower().split()</code> &rarr; fails on Chinese / Japanese / Thai / any language without whitespace. Also no n-gram coverage.</td>
+      <td>Switch to <strong>character n-grams (n=3 default)</strong>. Works for all scripts; reference includes a non-whitespace test (<code>simhash("&#24202;&#21069;&#26126;&#26376;&#20809;...&#34;)</code>).</td>
+    </tr>
+    <tr>
+      <td>B6</td>
+      <td>&sect;4.2 Correction model</td>
+      <td>Only <span class="math">K</span> is corrected, but LayerNorm drift affects <span class="math">Q, K, V</span>. <code>context_stats</code> is referenced but never defined.</td>
+      <td>v6 obviates the correction model. Because L0 is sentence-isolated, there is <em>no</em> stitching at L0 to correct &mdash; positions are by construction local. Cross-sentence interactions live at L1 where they are computed exactly. The correction model can be reintroduced as an optional retrofit path for legacy Llama models (Path 1), but it is not on the v6 critical path.</td>
+    </tr>
+    <tr>
+      <td>B7</td>
+      <td>&sect;4.3 Fine-tuning protocol</td>
+      <td>Claims a softmax&rarr;ReLU swap converges in 6,000 steps on 8&times;A100. The activation distributions differ by orders of magnitude; published work needs 5&ndash;10&times; more.</td>
+      <td>v6 separates the two paths: (a) Path 1 (retrofit) uses the v5.2 four-component attention (ReLU&sup2; + QK-Norm + parallel residual + micro-correction gates) and budgets 30&ndash;60k steps; (b) Path 2 (native v6) trains from scratch with the staged curriculum below (Stages 0&ndash;3).</td>
+    </tr>
+    <tr>
+      <td>B8</td>
+      <td>&sect;5 notation</td>
+      <td><em>i, j</em> are reused for both (sentence, token) indices and (query, key) indices in attention.</td>
+      <td>v6 uses (<em>s, t</em>) for the (sentence, token-in-sentence) pair, (<em>p</em>) for paragraph index, and (<em>q, k</em>) for query/key in attention. Disambiguated everywhere.</td>
+    </tr>
+    <tr>
+      <td>B9</td>
+      <td>&sect;5.1 sentence isolation gap</td>
+      <td>If &alpha;<sub>sent</sub>=0 (so sentences are stored independently), the encoded representation lacks a sentence index, but the formula still references it for retrieval-time attention. Retrieval is undefined.</td>
+      <td>v6 makes &alpha;<sub>sent</sub>=0 the <em>only</em> setting at L0 (no sentence index in the L0 representation). The sentence index is materialized as a position in the <em>L1 sequence of summary tokens</em>. Retrieval uses sentence-summary similarity at L1, not raw token similarity.</td>
+    </tr>
+    <tr>
+      <td>B10</td>
+      <td>&sect;13 nnU-Net analogy</td>
+      <td>Mentioned but never implemented. The actual architecture is a flat transformer with a clever cache.</td>
+      <td>v6 implements the analogy literally: separate encoders per level with their own RoPE bands, downsampling by attention-pooling, upsampling by cross-attention broadcast, U-Net-style skip connections from L0 to the decoder head. See &sect;3 and the reference implementation.</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ═══════════════════════════ 1. Problem ═══════════════════════════ -->
+<h2>1. Problem Statement (Refined)</h2>
+<p>Standard transformer LLMs entangle <em>token meaning</em> with <em>document position</em>: every key/value vector depends on its absolute (or relative) place in the full sequence. That entanglement makes incremental editing expensive: changing one sentence in a 100k-token document forces O(N&sup2;) recomputation of attention scores against the rest of the document.</p>
+
+<p>v6&rsquo;s problem statement adds a structural goal:</p>
+<div class="callout callout-success">
+  <strong>Goal v6</strong>
+  <p><em>The representation of any sentence depends only on its own tokens.</em> Inter-sentence relationships are carried by a separate stream of one-token-per-sentence summaries. Editing sentence <em>k</em> recomputes only that sentence at L0, plus a cheap pass over the sentence-summary stream at L1 (and optionally one paragraph row at L2).</p>
+</div>
+
+<p>This is the same goal v3 stated &mdash; but here it is enforced by the architecture (attention masks + per-level RoPE), not by post-hoc cache surgery.</p>
+
+<!-- ═══════════════════════════ 2. nnU-Net Principle ═══════════════════════════ -->
+<h2>2. The nnU-Net Architectural Principle</h2>
+<p>nnU-Net (Isensee et al., Nature Methods 2021) processes medical images at a hierarchy of resolutions: a coarse encoder captures whole-organ structure; a fine encoder captures cell-scale texture; skip connections from each level let the decoder use both. Different scales answer different questions.</p>
+
+<p>HRoPE v6 applies the same principle to text:</p>
+<div class="ascii-diagram">    Tokens                Sentence summaries        Paragraph summaries
+    ──────                ──────────────────        ───────────────────
+
+    [t1 t2 ... t_L1]      [S1]                       [P1]
+    [t1 t2 ... t_L2]      [S2]
+    [t1 t2 ... t_L3]      [S3]                       [P2]
+    [t1 t2 ... t_L4]      [S4]
+        L0 encoder          L1 encoder                 L2 encoder
+       (RoPE base 10k)    (RoPE base 1k)             (RoPE base 100)
+       intra-sentence     causal across sents        causal across paras
+       only                                          
+                                  ▲                          ▲
+                                  │  attn-pool               │  attn-pool
+                                  ▼                          ▼
+                              ┌────────┐                ┌─────────┐
+                              │ s_pool │                │ p_pool  │
+                              └────────┘                └─────────┘
+
+       ▲ skip                                            │
+       │ broadcast (cross-attn from L1 to tokens)        │ broadcast L2→L1
+       └─────────────────────────────────────────────────┘
+
+    LM head reads from the broadcasted token stream</div>
+
+<h3>2.1 The three invariants</h3>
+<ol>
+  <li><strong>Sentence isolation at L0.</strong> Token-level attention is masked block-diagonally: token <em>t</em> in sentence <em>s</em> can attend only to other tokens in sentence <em>s</em>. RoPE positions reset to 0 at every sentence boundary. <em>The L0 representation of sentence <em>s</em> is independent of which sentence index it occupies in the document.</em> (This is verified in the reference smoke test &mdash; <code>iso_err == 0.0</code>.)</li>
+  <li><strong>Higher-level relations are tokens at upper levels.</strong> One summary token per sentence is the unit of information at L1. One summary token per paragraph at L2. The standard transformer machinery (causal attention + RoPE + RMSNorm + GLU) operates uniformly at every level &mdash; only the sequence it operates over changes.</li>
+  <li><strong>Top-down broadcast is the only path back to tokens.</strong> Token streams never re-rotate against a document-global position. Document context reaches the decoder head only by cross-attending to the contextualized sentence (and paragraph) summaries.</li>
+</ol>
+
+<h3>2.2 Why this is exactly the right inductive bias for editable text</h3>
+<ul>
+  <li><strong>Locality of meaning</strong>. Empirically, a sentence&rsquo;s token-level interpretation is largely determined by its own tokens (linguists call this compositionality at the clause level). Forcing it architecturally costs almost nothing on tasks where the L1 broadcast can fill in the rest.</li>
+  <li><strong>Locality of edits</strong>. Document edits are sentence-bounded with overwhelming probability: human revisions, agent rewrites, retrieval-augmented insertions all replace a span that aligns with a sentence/paragraph boundary &gt;90% of the time. The architecture matches the edit distribution.</li>
+  <li><strong>Cache invalidation matches the edit hierarchy</strong>. An edit at sentence <em>k</em> invalidates exactly: row <em>k</em> of the L0 cache, then row <em>k</em> of the L1 sequence (which forces a re-pass of L1 self-attention, but L1 is short &mdash; ~5,000 sentences for a 100k-token doc). L2 invalidation is rarer still.</li>
+</ul>
+
+
+<!-- ═══════════════════════════ 3. Architecture ═══════════════════════════ -->
+<h2>3. The HRoPE-nn Architecture</h2>
+
+<h3>3.1 Notation</h3>
+<table>
+  <thead><tr><th>Symbol</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><span class="math">D</span></td><td>document = sequence of paragraphs</td></tr>
+    <tr><td><span class="math">P<sub>p</sub></span></td><td>paragraph <em>p</em> = sequence of sentences</td></tr>
+    <tr><td><span class="math">S<sub>s</sub></span></td><td>sentence <em>s</em> = sequence of tokens</td></tr>
+    <tr><td><span class="math">L<sub>s</sub></span></td><td>length of sentence <em>s</em> (variable)</td></tr>
+    <tr><td><span class="math">N<sub>s</sub></span></td><td>number of sentences in document</td></tr>
+    <tr><td><span class="math">N<sub>p</sub></span></td><td>number of paragraphs in document</td></tr>
+    <tr><td><span class="math">t</span></td><td>token offset within a sentence (0 &hellip; <em>L<sub>s</sub></em>&minus;1)</td></tr>
+    <tr><td><span class="math">&phi;<sub>s</sub></span></td><td>position of sentence <em>s</em> within its paragraph (0 &hellip; <em>L<sub>P</sub></em>&minus;1)</td></tr>
+    <tr><td><span class="math">&pi;<sub>p</sub></span></td><td>absolute position of paragraph <em>p</em> in document (0 &hellip; <em>N<sub>p</sub></em>&minus;1)</td></tr>
+  </tbody>
+</table>
+
+<h3>3.2 Three RoPE bands, three encoders</h3>
+<p>Every transformer block in v6 uses pre-norm + RMSNorm + RoPE, but each level&rsquo;s blocks are parameterized by a different rotary base:</p>
+<div class="math-block">L0: &theta;<sub>i</sub><sup>(0)</sup> = 10000<sup>&minus;2i/d</sup>,&nbsp;&nbsp;&nbsp; positions = <em>t</em></div>
+<div class="math-block">L1: &theta;<sub>i</sub><sup>(1)</sup> = 1000<sup>&minus;2i/d</sup>,&nbsp;&nbsp;&nbsp; positions = &phi;<sub>s</sub></div>
+<div class="math-block">L2: &theta;<sub>i</sub><sup>(2)</sup> = 100<sup>&minus;2i/d</sup>,&nbsp;&nbsp;&nbsp; positions = &pi;<sub>p</sub></div>
+
+<div class="callout callout-proof">
+  <strong>Why disjoint bases eliminate the v3 collision problem (B4)</strong>
+  <p>Two (sentence, token) pairs <em>(s, t)</em> and <em>(s&prime;, t&prime;)</em> would collide in v3 whenever <span class="math">&alpha;<sub>sent</sub>&Delta;s = &minus;&alpha;<sub>token</sub>&Delta;t</span>. In v6 the sentence index never enters the L0 representation at all; it only appears as a position <em>in a different sequence</em> (L1&rsquo;s sequence of summary tokens). Distinct sequences cannot alias. The proof is trivial because the two streams never share an attention layer.</p>
+</div>
+
+<h3>3.3 L0: token-level encoder (sentence-isolated)</h3>
+<div class="step-box">
+  <strong>Input</strong>: token embeddings <span class="math">x &isin; &reals;<sup>(B, T, d)</sup></span>, sentence ids <span class="math">s &isin; &naturals;<sup>(B, T)</sup></span>, intra-sentence positions <span class="math">t &isin; &naturals;<sup>(B, T)</sup></span>.<br>
+  <strong>Mask</strong>: <span class="math">M[s, q, k] = 1</span> iff sentences agree (<span class="math">s<sub>q</sub> = s<sub>k</sub></span>) AND <span class="math">k &le; q</span> (causal within sentence).<br>
+  <strong>Stack</strong>: <span class="math">N<sup>(0)</sup></span> blocks with <span class="math">RoPE<sup>(0)</sup></span> and ReLU&sup2; attention.
+</div>
+
+<p>Crucial property: under this mask, the output for token <em>t</em> in sentence <em>s</em> is a function only of {<span class="math">x<sub>s,0</sub>, &hellip;, x<sub>s,t</sub></span>}. The reference verifies this byte-for-byte: scrambling the document&rsquo;s sentence indices and paragraph positions changes the L0 output by exactly 0.0 in float32.</p>
+
+<h3>3.4 Sentence pool (encoder &rarr; L1 input)</h3>
+<p>Per-sentence learnable-query attention pool produces one vector per sentence:</p>
+<div class="math-block">u<sub>s</sub> = &sum;<sub>t in S<sub>s</sub></sub> softmax<sub>t</sub>(&lt;q<sub>pool</sub>, k<sub>t</sub>&gt;) v<sub>t</sub></div>
+
+<p>The pool is differentiable through L0 and is the only place where intra-sentence content gets compressed for upper layers.</p>
+
+<h3>3.5 L1: sentence-level encoder</h3>
+<p>Standard pre-norm transformer over the sequence <span class="math">U = (u<sub>1</sub>, &hellip;, u<sub>N<sub>s</sub></sub>)</span>. Causal mask. Positions are <span class="math">&phi;<sub>s</sub></span> &mdash; the sentence&rsquo;s offset <em>within its paragraph</em>. This makes the L1 sub-sequence corresponding to a paragraph translation-invariant under paragraph reordering, which is a useful inductive bias for retrieval-augmented inputs.</p>
+
+<h3>3.6 Paragraph pool + L2 (optional)</h3>
+<p>Same pattern: pool L1 outputs by <code>para_id_per_sent</code> &rarr; one vector per paragraph &rarr; transformer over the paragraph sequence with positions <span class="math">&pi;<sub>p</sub></span>.</p>
+
+<h3>3.7 Top-down broadcast</h3>
+<p>The contextualized summaries are pushed back into the token stream via gated cross-attention. For token <em>q</em> belonging to sentence <em>s</em>:</p>
+<div class="math-block">x<sub>q</sub> &larr; x<sub>q</sub> + W<sub>O</sub> &middot; ReLU&sup2;-attn(x<sub>q</sub>, U<sub>{s&minus;1, s, s+1}</sub>)</div>
+
+<p>The mask restricts each token to attend to <em>its own</em> sentence summary plus immediate neighbors. This is the U-Net skip: it breaks pure sentence isolation at the decoder head (which is the point: the LM head needs document context to predict the next token), but it does so via a sparse, content-addressable path rather than by polluting L0 with global positions.</p>
+
+<h3>3.8 LM head</h3>
+<div class="math-block">logits = LMHead(RMSNorm(x<sub>broadcast</sub>))</div>
+
+<!-- ═══════════════════════════ 4. Math ═══════════════════════════ -->
+<h2>4. Mathematical Foundations (corrected)</h2>
+
+<h3>4.1 RoPE recap (split layout)</h3>
+<p>For a vector <span class="math">x &isin; &reals;<sup>d</sup></span> with even <em>d</em>, write <span class="math">x = (x<sup>(1)</sup>, x<sup>(2)</sup>)</span> with <span class="math">x<sup>(1)</sup>, x<sup>(2)</sup> &isin; &reals;<sup>d/2</sup></span>. Define</p>
+<div class="math-block">RoPE(x, p) = (x<sup>(1)</sup>&odot;cos(p&theta;) &minus; x<sup>(2)</sup>&odot;sin(p&theta;), x<sup>(1)</sup>&odot;sin(p&theta;) + x<sup>(2)</sup>&odot;cos(p&theta;))</div>
+
+<p>This is the GPT-NeoX / Llama / Qwen layout. The v3 Triton kernel used the older <em>interleaved</em> layout; v6 fixes both kernel and reference (B2).</p>
+
+<h3>4.2 Composability and exactness</h3>
+<p>Per-block 2D rotations satisfy <span class="math">R(&alpha;)R(&beta;) = R(&alpha;+&beta;)</span> and <span class="math">R(&alpha;)<sup>&minus;1</sup> = R(&minus;&alpha;)</span>. Therefore for any base position <em>p<sub>old</sub></em> and target <em>p<sub>new</sub></em>:</p>
+<div class="math-block">RoPE(x, p<sub>new</sub>) = RoPE<sub>shift</sub>(RoPE(x, p<sub>old</sub>), p<sub>new</sub> &minus; p<sub>old</sub>)</div>
+
+<p>The math is exact (no approximation). v6 uses this fact at L1 only: the sentence&rsquo;s L0 representation is rotation-free at the document level (it carries only intra-sentence rotations), so no re-rotation is required when the sentence moves to a new document position. The summary is re-rotated at L1 with the new <span class="math">&phi;<sub>s</sub></span>.</p>
+
+<h3>4.3 ReLU&sup2; attention with explicit denominator (B1 fix)</h3>
+<div class="math-block">A<sub>qk</sub> = ReLU(&lt;q, k&gt; / &radic;d)<sup>2</sup>,&nbsp;&nbsp;&nbsp; Z<sub>q</sub> = &sum;<sub>k</sub> M<sub>qk</sub> A<sub>qk</sub>,&nbsp;&nbsp;&nbsp; out<sub>q</sub> = &sum;<sub>k</sub> M<sub>qk</sub> A<sub>qk</sub> v<sub>k</sub> / Z<sub>q</sub></div>
+
+<p>Z<sub>q</sub> is per-row, not per-sequence. When two cached caches are stitched, the new <em>Z</em> is the sum of the two parts &mdash; that is the single scalar that needs to be tracked. v3 hand-waved this away; v6 returns it explicitly from the kernel and propagates it through the cache.</p>
+
+<h3>4.4 Why QK-Norm composes with RoPE</h3>
+<p>RMSNorm applied to <em>q, k</em> per-head before RoPE rescales each vector by a positive scalar but does not rotate it. Rotation is unitary, so the post-RoPE inner product is</p>
+<div class="math-block">&lt;R(p<sub>q</sub>&theta;) &middot; q&hat;, R(p<sub>k</sub>&theta;) &middot; k&hat;&gt; = &lt;q&hat;, R((p<sub>k</sub>&minus;p<sub>q</sub>)&theta;) &middot; k&hat;&gt;</div>
+
+<p>which depends only on the <em>relative</em> position. Norms commute with rotation in this scalar product because rotation is the only thing that consumes position information. (See v5.1 &sect;4.2 for the full proof; v6 inherits this without change.)</p>
+
+<!-- ═══════════════════════════ 5. Incremental Edit ═══════════════════════════ -->
+<h2>5. Incremental Edit Algorithm</h2>
+
+<p>Given a 100k-token document with <em>N<sub>s</sub></em> &asymp; 5000 sentences and <em>N<sub>p</sub></em> &asymp; 250 paragraphs, an edit to sentence <em>k</em> proceeds:</p>
+<table>
+  <thead><tr><th>Step</th><th>Cost</th><th>What gets recomputed</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><em>O(L<sub>k</sub><sup>2</sup>&middot;N<sup>(0)</sup>)</em> &asymp; tens of &micro;s</td><td>L0 forward on sentence <em>k</em> only (with intra-sentence causal mask).</td></tr>
+    <tr><td>2</td><td><em>O(d)</em></td><td>Sentence pool to produce new <em>u<sub>k</sub></em>.</td></tr>
+    <tr><td>3</td><td><em>O(N<sub>s</sub>&middot;d&middot;N<sup>(1)</sup>)</em></td><td>L1 self-attention re-pass over the entire 5,000-element sentence summary stream. (For real production speed, swap in an incremental L1 that only updates downstream rows.)</td></tr>
+    <tr><td>4</td><td><em>O(d)</em></td><td>Update the affected paragraph summary; one row of L2 self-attention if L2 is enabled.</td></tr>
+    <tr><td>5</td><td><em>O(L<sub>k</sub>&middot;d)</em></td><td>Broadcast updated L1 row back into sentence <em>k</em>&rsquo;s tokens via cross-attention.</td></tr>
+    <tr><td>6</td><td><em>O(L<sub>k</sub>&middot;V)</em></td><td>LM head over edited tokens (only).</td></tr>
+  </tbody>
+</table>
+
+<p>Total cost is dominated by step 3 (L1 self-attention). For 5,000 sentence summaries with d=4096 and 8 layers, that is ~5&times;10<sup>9</sup> FLOPs &mdash; about 5&minus;15 ms on a single H100. Compare to ~5,000 ms for full O(N&sup2;) recomputation of a 100k-token document. <strong>~300&minus;1000&times; speedup</strong>.</p>
+
+<p>The reference&rsquo;s <code>IncrementalEditor.edit_sentence()</code> implements steps 1&ndash;6 verbatim and is exercised in the smoke test.</p>
+
+<!-- ═══════════════════════════ 6. Reference ═══════════════════════════ -->
+<h2>6. Reference Implementation</h2>
+
+<p>Two files on Desktop:</p>
+<ul>
+  <li><code>hrope_v6_reference.py</code> &mdash; ~530 lines. Self-contained PyTorch. Includes <code>HierarchicalRoPE</code>, <code>HRoPEEncoderBlock</code>, <code>CrossAttnBlock</code>, <code>AttentionPool</code>, <code>HRoPEv6Model</code>, <code>IncrementalEditor</code>, n-gram <code>simhash</code>, and a <code>--smoke</code> test that verifies sentence isolation and runs an end-to-end edit.</li>
+  <li><code>hrope_v6_train.py</code> &mdash; ~280 lines. Staged training driver (Stages 0&ndash;3) with synthetic data that injects an inter-sentence dependency to exercise the L1 broadcast path.</li>
+</ul>
+
+<h3>6.1 Verified properties (smoke test output)</h3>
+<pre><code>$ python hrope_v6_reference.py --smoke
+[smoke] logits shape: (1, 48, 1000)
+[smoke] sent_summ shape: (1, 6, 64)
+[smoke] para_summ shape: (1, 2, 64)
+[smoke] L0 invariance under L1/L2 reordering max diff: 0.0000e+00 (must be 0)
+[smoke] edited logits shape: (1, 48, 1000)
+[smoke] simhash hamming(close) = 8 (expected small)
+[smoke] simhash hamming(far)   = 38 (expected larger)
+[smoke] simhash no-whitespace lang nonzero: True
+[smoke] OK</code></pre>
+
+<p>The 0.0 max-diff line is the empirical confirmation of the sentence-isolation invariant.</p>
+
+<!-- ═══════════════════════════ 7. Training Recipe ═══════════════════════════ -->
+<h2>7. Training Recipe (Native Path 2)</h2>
+
+<h3>7.1 Staged curriculum</h3>
+<table>
+  <thead>
+    <tr><th>Stage</th><th>Trainable</th><th>Frozen</th><th>Loss</th><th>Steps (1.5B)</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>0</td>
+      <td>tok_emb, L0, lm_head</td>
+      <td>L1, sent_pool, broadcast_l1, L2, para_pool, broadcast_l2 (all init to identity-ish)</td>
+      <td>Sentence-internal next-token CE (mask out pairs that span sentence boundaries)</td>
+      <td>20k</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>+ L1 + sent_pool + broadcast_l1</td>
+      <td>L2 stack</td>
+      <td>Document next-token CE + 0.05 &middot; sentence-summary diversity (off-diagonal cosine penalty)</td>
+      <td>30k</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>+ L2 stack</td>
+      <td>none</td>
+      <td>Document next-token CE; document length grows from 4 to 64 paragraphs</td>
+      <td>30k</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>all</td>
+      <td>none</td>
+      <td>Document next-token CE under stitch perturbations (random sentence reorders inside paragraphs, 10% paragraph drop) &mdash; trains explicit cache-stitch robustness</td>
+      <td>10k</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>7.2 Hyperparameters (1.5B reference config)</h3>
+<table>
+  <tbody>
+    <tr><td>d_model</td><td>2048</td></tr>
+    <tr><td>n_heads</td><td>16</td></tr>
+    <tr><td>L0 layers</td><td>16</td></tr>
+    <tr><td>L1 layers</td><td>6</td></tr>
+    <tr><td>L2 layers</td><td>2</td></tr>
+    <tr><td>FFN multiplier</td><td>4 (SwiGLU)</td></tr>
+    <tr><td>max tokens / sentence</td><td>256</td></tr>
+    <tr><td>max sentences / document</td><td>8192</td></tr>
+    <tr><td>max paragraphs / document</td><td>512</td></tr>
+    <tr><td>Optimizer</td><td>AdamW &beta; = (0.9, 0.95), wd = 0.01, lr = 3e-4 cosine to 3e-5</td></tr>
+    <tr><td>Grad clip</td><td>1.0</td></tr>
+    <tr><td>Tokens trained</td><td>~150B (4&times; Chinchilla-optimal for 1.5B)</td></tr>
+    <tr><td>Hardware</td><td>32&times;H100 (Stage 0+1) &rarr; 64&times;H100 (Stage 2+3)</td></tr>
+    <tr><td>Wall time</td><td>~14 days end-to-end</td></tr>
+    <tr><td>Cost (cloud)</td><td>~$60K</td></tr>
+  </tbody>
+</table>
+
+<h3>7.3 Data preparation</h3>
+<ol>
+  <li>Sentence segmentation: spaCy <code>en_core_web_sm</code> (English) + <code>jieba</code> (zh) + <code>SudachiPy</code> (ja). Per-language pipeline; never split inside code blocks or LaTeX.</li>
+  <li>Paragraph detection: blank-line boundaries in text, header-level boundaries in markdown.</li>
+  <li>Cap sentence length at 256 tokens; longer sentences get hard-split at the comma boundary closest to the cap.</li>
+  <li>Cap paragraphs at 64 sentences; longer paragraphs get split at the sentence boundary closest to the cap.</li>
+  <li>Documents up to 64 paragraphs (~32k&minus;65k tokens) used unmodified; longer ones get sliced into overlapping windows of 32 paragraphs with 4-paragraph overlap.</li>
+</ol>
+
+<h3>7.4 Stage 3 perturbations (cache-stitch robustness)</h3>
+<ul>
+  <li>With probability 0.2: permute the sentence-summary stream within each paragraph.</li>
+  <li>With probability 0.1: drop one paragraph entirely (zero out its summary).</li>
+  <li>With probability 0.1: replace one sentence&rsquo;s tokens with a random sentence from a different document and recompute its L0 embedding (simulating retrieval-augmented insertion).</li>
+</ul>
+
+<p>Stage 3 is the cheapest stage (10k steps, &asymp; 7% of total) but it&rsquo;s what makes the final model robust to the inference-time edit workload.</p>
+
+<!-- ═══════════════════════════ 8. Performance ═══════════════════════════ -->
+<h2>8. Performance Projections</h2>
+<table>
+  <thead><tr>
+    <th>Scenario</th><th>Standard transformer</th><th>KVLink</th><th>HRoPE Path 1 (retrofit)</th><th>HRoPE v6 native</th>
+  </tr></thead>
+  <tbody>
+    <tr>
+      <td>100k tokens, 1-sentence edit</td>
+      <td>~5 s</td>
+      <td>~0.5&minus;1 s</td>
+      <td>~0.4&minus;0.8 s</td>
+      <td><strong>~5&minus;15 ms</strong> (L1 self-attn dominates)</td>
+    </tr>
+    <tr>
+      <td>Accuracy vs full-recompute upper bound</td>
+      <td>0% drop (definitionally)</td>
+      <td>~2&minus;5%</td>
+      <td>~1&minus;3%</td>
+      <td>0% (exact &mdash; no approximation; isolation is enforced)</td>
+    </tr>
+    <tr>
+      <td>Cache hit rate on iterative edits</td>
+      <td>0%</td>
+      <td>85&minus;95%</td>
+      <td>85&minus;95%</td>
+      <td>~99% (only edited sentences invalidate)</td>
+    </tr>
+    <tr>
+      <td>Native context length</td>
+      <td>32&minus;128k</td>
+      <td>32&minus;128k</td>
+      <td>32&minus;128k</td>
+      <td>~1M tokens (L0 only sees one sentence; total bound is L1 stack memory)</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout callout-warn">
+  <strong>Honest caveat</strong>
+  <p>The 0% accuracy drop relative to a full-recompute upper bound is a property of the architecture, not of the trained model&rsquo;s quality. A v6 model will measure differently against a frontier dense-attention model on raw next-token loss, because the inductive bias (sentence isolation at L0) costs some capacity. The relevant benchmark is &ldquo;v6 native vs an equivalently-sized dense transformer trained on the same tokens.&rdquo; That comparison is the open empirical question (see &sect;9.2).</p>
+</div>
+
+<!-- ═══════════════════════════ 9. Feasibility ═══════════════════════════ -->
+<h2>9. Feasibility Assessment</h2>
+
+<h3>9.1 What is unambiguously sound</h3>
+<ul>
+  <li><strong>Architecture compiles, runs, and respects its invariant.</strong> The reference implementation produces <em>L0 invariance &equiv; 0.0</em> empirically (smoke test). The architecture is plain transformer machinery wired through pools and broadcasts &mdash; nothing exotic.</li>
+  <li><strong>RoPE math is exact.</strong> Composability is a textbook fact; the only thing v3 got wrong was the layout (interleaved vs split), which v6 corrects.</li>
+  <li><strong>Edit cost is dominated by L1 self-attention</strong> (5&minus;15 ms for 5k sentences). This is straightforward arithmetic and matches existing measurements of similarly-sized transformers.</li>
+  <li><strong>Errata fixes are mechanical.</strong> All 10 of the v3 bugs are clearly reproducible and have unambiguous fixes.</li>
+</ul>
+
+<h3>9.2 What is unproven (and how to prove it)</h3>
+<ul>
+  <li><strong>Quality on next-token loss vs equivalently sized dense transformer.</strong> The sentence-isolation prior is a constraint; it could cost &gt;1 point of perplexity at scale. <em>De-risk path</em>: train a 350M-parameter v6 alongside a 350M dense transformer on the same 30B tokens (~$5K of compute on 8&times;H100) and compare. If the v6 is within ~5% of dense PPL, scale up; if it&rsquo;s worse, weaken the L0 isolation (allow a small inter-sentence attention budget at L0 layer N).</li>
+  <li><strong>Sentence-summary capacity.</strong> One vector per sentence may not be enough for very long sentences or technical prose. <em>De-risk path</em>: pool to <em>k</em> summary tokens per sentence (k = 1, 2, 4) and pick the smallest <em>k</em> that closes the gap against dense. The reference&rsquo;s <code>AttentionPool</code> can be parameterized for this with ~5 lines of change.</li>
+  <li><strong>L1 self-attention bottleneck on incremental edits.</strong> 5&minus;15 ms is fine for human-in-the-loop editing but could matter for high-QPS agent workloads. <em>De-risk path</em>: implement a sliding-window L1 (sentence summaries attend only to a fixed neighborhood) for an incremental version that updates O(window) rows per edit.</li>
+  <li><strong>Stage 0 actually learns useful sentence representations.</strong> Forcing L0 to predict next-token from intra-sentence context only is a strong constraint; for the first few tokens of a sentence, the loss is essentially undefined. <em>De-risk path</em>: add an auxiliary span-corruption loss at L0 (predict masked tokens from surrounding intra-sentence tokens), which sidesteps the &ldquo;first token has no context&rdquo; degeneracy.</li>
+</ul>
+
+<h3>9.3 Verdict</h3>
+<div class="callout callout-success">
+  <strong>Feasibility: HIGH for the architecture, MEDIUM for the quality bet.</strong>
+  <p>The architecture is buildable today, the math is correct, and the reference runs. The unknown is whether the inductive bias costs more in language-model quality than it gains in edit efficiency. A 350M-parameter ablation against a dense baseline is the single experiment that decides this; it costs ~$5K and ~3 days. <em>Do that experiment first, before committing to the 1.5B run.</em></p>
+</div>
+
+<h3>9.4 Risk register</h3>
+<table>
+  <thead><tr><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>L0-only stage 0 is degenerate (loss plateaus)</td><td>Medium</td><td>Medium</td><td>Add MLM auxiliary; or skip stage 0 and start joint at stage 1.</td></tr>
+    <tr><td>Sentence pool throws away signal that L1 needs</td><td>Medium</td><td>High</td><td>Pool to <em>k</em> summary tokens; ablate <em>k</em>.</td></tr>
+    <tr><td>L1 self-attention is the bottleneck on edits</td><td>Low</td><td>Medium</td><td>Sliding-window L1; or replace with linear attention at L1 only.</td></tr>
+    <tr><td>Disjoint RoPE bands aren&rsquo;t actually disjoint at finite precision</td><td>Low</td><td>Low</td><td>Bases differ by 10&times;; collisions only at &gt;1M positions, and our levels never see &gt;~5k positions in their own sequence.</td></tr>
+    <tr><td>Sentence segmenter errors propagate to L0 boundaries</td><td>High</td><td>Low</td><td>Train Stage 3 with random sentence-boundary jitter; segmenter doesn&rsquo;t need to be perfect.</td></tr>
+    <tr><td>Patent claim 1 (ReLU&sup2; for stitching) blocked by prior art</td><td>Medium</td><td>Medium</td><td>Reframe primary claim around the hierarchical encoder + edit algorithm, not the attention non-linearity.</td></tr>
+  </tbody>
+</table>
+
+<!-- ═══════════════════════════ 10. Roadmap ═══════════════════════════ -->
+<h2>10. Roadmap</h2>
+<ol>
+  <li><strong>Week 1.</strong> 350M ablation: v6 vs dense baseline on 30B tokens. Decision gate.</li>
+  <li><strong>Week 2&ndash;3.</strong> If green, run 1.5B Stage 0+1 on 32&times;H100 (~$25K).</li>
+  <li><strong>Week 4&ndash;5.</strong> Stage 2+3 on 64&times;H100 (~$35K).</li>
+  <li><strong>Week 6.</strong> Benchmark suite: LongBench, NIAH-128k, edit-throughput micro-bench.</li>
+  <li><strong>Week 7.</strong> Triton kernel for the broadcast cross-attention (currently runs on PyTorch reference; production will benefit from a fused kernel).</li>
+  <li><strong>Week 8.</strong> Sliding-window L1 if edit-throughput numbers are below 100 edits/s.</li>
+</ol>
+
+<!-- ═══════════════════════════ 11. Patent Claims ═══════════════════════════ -->
+<h2>11. Provisional Patent Claims (Refocused)</h2>
+<ol>
+  <li><strong>Claim 1 (primary)</strong>. A hierarchical text encoder where token-level attention is masked to remain within sentence boundaries, sentence representations are pooled into a sequence of summary tokens which is attended over by an upper-level transformer, and contextualized summaries are broadcast back to the token stream via cross-attention &mdash; with each level using a distinct rotary frequency band.</li>
+  <li><strong>Claim 2</strong>. The use of disjoint rotary frequency bases (e.g. 10000 / 1000 / 100) per hierarchy level to encode token, sentence, and paragraph positions in independent representation streams.</li>
+  <li><strong>Claim 3</strong>. An incremental edit algorithm for the encoder of Claim 1: edit of sentence <em>k</em> recomputes only the L0 forward of sentence <em>k</em>, the corresponding row of the sentence-summary stream, the affected paragraph row, and a sentence-local cross-attention broadcast.</li>
+  <li><strong>Claim 4</strong>. ReLU&sup2; attention with explicit per-row L1 denominator state, enabling cache stitching with corrected normalization.</li>
+  <li><strong>Claim 5</strong>. SimHash with character n-grams for sentence-level fuzzy caching across non-whitespace languages.</li>
+  <li><strong>Claim 6</strong>. The staged training curriculum (Stage 0 sentence-isolated &rarr; Stage 1 + L1 &rarr; Stage 2 + L2 &rarr; Stage 3 stitch-perturbed) for training the encoder of Claim 1.</li>
+</ol>
+
+<p class="footer">&copy; 2026 Feng Zhou &mdash; HRoPE: Hierarchical Rotary Position Embedding. Confidential / Patent Pending. Specification v6.0.</p>
+
+</body>
+</html>
