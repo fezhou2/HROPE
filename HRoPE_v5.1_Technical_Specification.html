@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HRoPE: Hierarchical Rotary Position Embedding | Technical Specification v5.2</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a2e;
+    --accent: #2563eb;
+    --accent2: #7c3aed;
+    --border: #e2e8f0;
+    --code-bg: #f8fafc;
+    --table-header: #f1f5f9;
+    --callout-bg: #eff6ff;
+    --callout-border: #93c5fd;
+    --warn-bg: #fef3c7;
+    --warn-border: #fbbf24;
+    --success-bg: #ecfdf5;
+    --success-border: #6ee7b7;
+    --new-bg: #faf5ff;
+    --new-border: #c084fc;
+    --proof-bg: #f0fdf4;
+    --proof-border: #86efac;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.75;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+  h1 { font-size: 2rem; margin-bottom: 0.25em; color: var(--accent); }
+  h2 { font-size: 1.5rem; margin: 2.2em 0 0.5em; color: var(--fg); border-bottom: 2px solid var(--accent); padding-bottom: 0.2em; }
+  h3 { font-size: 1.15rem; margin: 1.5em 0 0.4em; color: var(--accent2); }
+  h4 { font-size: 1rem; margin: 1.2em 0 0.3em; font-style: italic; }
+  p { margin: 0.6em 0; }
+  .subtitle { font-size: 1.05rem; color: #475569; margin-bottom: 0.5em; }
+  .meta { font-size: 0.9rem; color: #64748b; margin-bottom: 2em; display: flex; gap: 2em; flex-wrap: wrap; }
+  .version-badge { background: var(--accent); color: white; padding: 2px 10px; border-radius: 12px; font-weight: bold; font-size: 0.8rem; }
+  .new-badge { background: var(--accent2); color: white; padding: 1px 8px; border-radius: 10px; font-weight: bold; font-size: 0.7rem; vertical-align: middle; margin-left: 6px; }
+  table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.92rem; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--table-header); font-weight: 600; }
+  code { font-family: 'Menlo', 'Consolas', 'Courier New', monospace; font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--border); }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 16px; overflow-x: auto; margin: 1em 0; font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; border: none; padding: 0; }
+  .callout { border-left: 4px solid var(--callout-border); background: var(--callout-bg); padding: 12px 16px; margin: 1.2em 0; border-radius: 0 6px 6px 0; }
+  .callout-warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
+  .callout-success { border-left-color: var(--success-border); background: var(--success-bg); }
+  .callout-new { border-left-color: var(--new-border); background: var(--new-bg); }
+  .callout-proof { border-left-color: var(--proof-border); background: var(--proof-bg); }
+  .callout strong { display: block; margin-bottom: 4px; }
+  .math { font-family: 'Cambria Math', 'Latin Modern Math', 'Georgia', serif; font-style: italic; }
+  .math-block {
+    display: block; text-align: center; margin: 1.2em auto; font-size: 1.08em;
+    font-family: 'Cambria Math', 'Latin Modern Math', 'Georgia', serif;
+    font-style: italic; overflow-x: auto; max-width: 100%;
+  }
+  .math-block-left {
+    display: block; margin: 0.8em 0 0.8em 2em; font-size: 1.05em;
+    font-family: 'Cambria Math', 'Latin Modern Math', 'Georgia', serif;
+    font-style: italic; overflow-x: auto;
+  }
+  .math-label {
+    font-weight: bold; font-style: normal; color: #64748b; font-size: 0.85em;
+    margin-right: 1em;
+  }
+  ul, ol { margin: 0.5em 0 0.5em 1.5em; }
+  li { margin: 0.35em 0; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 1em 0; }
+  .col-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .col-card h3 { margin-top: 0; }
+  .step-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin: 0.8em 0; }
+  .step-box strong { color: var(--accent2); }
+  .footer { margin-top: 4em; padding-top: 1em; border-top: 1px solid var(--border); font-size: 0.85rem; color: #64748b; }
+  @media print { body { max-width: none; padding: 20px; font-size: 11pt; } h2 { page-break-after: avoid; } pre, table, .callout { page-break-inside: avoid; } }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Hierarchical Rotary Position Embedding (HRoPE)</h1>
+<p class="subtitle">Incremental inference for LLMs via sentence-level caching, re-rotatable KV, and decomposable normalized attention</p>
+<div class="meta">
+  <span>&#128196; Feng Zhou &mdash; April 2026</span>
+  <span>Patent Pending</span>
+  <span class="version-badge">Technical Specification v5.2</span>
+</div>
+
+<div class="callout callout-new">
+  <strong>&#9889; Version History</strong>
+  <ul style="margin: 0.5em 0 0 1.2em;">
+    <li><strong>v3 &rarr; v4:</strong> Replaced underspecified &ldquo;ReLU + renormalization&rdquo; and 50M correction model with
+        four-component architecture (ReLU&sup2;, QK-Norm, parallel residual, micro-correction gates).</li>
+    <li><strong>v4 &rarr; v5 (DeepSeek review):</strong> Added training hyperparameters and exactness qualification.
+        However, incorrectly claimed QK-Norm &ldquo;breaks RoPE&rdquo; and introduced code shape bugs.</li>
+    <li><strong>v5 &rarr; v5.1:</strong> Restores QK-Norm with a full proof that it preserves RoPE.
+        Fixes all code bugs. Keeps the good v5 additions (exactness qualification, training hyperparameters).
+        Offers both scalar and vector gate options. Expands mathematical exposition throughout.</li>
+    <li><strong>v5.1 &rarr; v5.2 (this document):</strong> Errata pass.
+        Replaces the incorrect &ldquo;O((&alpha;C)<sup>L</sup>) exponential decay&rdquo; bound in &sect;4.3 with an
+        honest bounded-growth recurrence (per-layer factor &rho; = 1+&alpha;C+&beta;L<sub>F</sub>) and
+        propagates the corrected statement to &sect;4.1, &sect;4.5, &sect;6, &sect;12, and Patent Claim 3.
+        Fixes the &sect;4.1 broken-stitching algebra to use per-key weights w<sub>i</sub>.
+        Adds the gain-less RMSNorm caveat to the &sect;4.2 equivalence claim.
+        Clarifies that &mu;, &sigma; statistics are over <em>base</em> (pre-RoPE) keys and switches
+        &sect;4.4 to log-&sigma;-ratio for stability. Fixes the seg_stats shape pipeline in &sect;5.
+        Specifies the Triton kernel&rsquo;s launch grid and RoPE layout convention. Bumps Phase 1 step
+        targets in &sect;10.1. Notes the prefix-caching baseline assumption in &sect;11. Replaces invalid
+        HTML entities. Softens Patent Claim 5 to acknowledge prior art on RoPE composability.</li>
+  </ul>
+</div>
+
+
+<!-- ═══════════════════════════ SECTION 1 ═══════════════════════════ -->
+<h2>1. Problem Statement</h2>
+
+<p>Standard LLMs recompute the entire KV cache when any token changes. For a 100k-token document,
+editing one word triggers O(N&sup2;) recomputation &mdash; several seconds of GPU time. This makes iterative
+editing prohibitively expensive and prevents true incremental compilation for LLMs.</p>
+
+<p><strong>Our Goal:</strong> Edit a sentence, recompute only that sentence. Everything else is served from a
+precomputed, position-agnostic cache.</p>
+
+<div class="callout">
+  <strong>&#128161; Analogy &mdash; nnU-Net for Medical Imaging</strong>
+  nnU-Net processes images at multiple resolutions (organ &rarr; tissue &rarr; cell). HRoPE processes text at
+  multiple levels (paragraph &rarr; sentence &rarr; token). This hierarchical structure enables efficient,
+  incremental updates and multi-scale pattern recognition.
+</div>
+
+
+<!-- ═══════════════════════════ SECTION 2 ═══════════════════════════ -->
+<h2>2. Core Mathematical Insight: The Composability of Rotation</h2>
+
+<h3>2.1 RoPE Recap</h3>
+
+<p>RoPE (Rotary Position Embedding) encodes position by rotating each key and query vector in
+paired dimensions. For a vector <span class="math">x &isin; &Ropf;<sup>d</sup></span> with even <span class="math">d</span>,
+RoPE groups the dimensions into <span class="math">d/2</span> pairs and applies a 2D rotation to each pair:</p>
+
+<div class="math-block">RoPE(x, p) = R(p&theta;) &middot; x</div>
+
+<p>where <span class="math">R(p&theta;)</span> is a <strong>block-diagonal matrix</strong> of <span class="math">d/2</span> rotation blocks:</p>
+
+<div class="math-block" style="font-size: 0.95em;">
+R(p&theta;) = diag&bigl(R<sub>2&times;2</sub>(p&theta;<sub>0</sub>),&ensp; R<sub>2&times;2</sub>(p&theta;<sub>1</sub>),&ensp; &hellip;,&ensp; R<sub>2&times;2</sub>(p&theta;<sub>d/2&minus;1</sub>)&bigr;)
+</div>
+
+<p>Each 2&times;2 block rotates one pair of dimensions by angle <span class="math">p&middot;&theta;<sub>i</sub></span>:</p>
+
+<div class="math-block">
+R<sub>2&times;2</sub>(&alpha;) =
+<span style="font-size:1.3em;">[</span>
+cos(&alpha;) &ensp; &minus;sin(&alpha;)
+<br>&emsp;&emsp;&emsp;&emsp;&emsp;
+sin(&alpha;) &ensp;&ensp;&ensp; cos(&alpha;)
+<span style="font-size:1.3em;">]</span>
+</div>
+
+<p>The frequencies follow a geometric progression:</p>
+<div class="math-block">&theta;<sub>i</sub> = 10000<sup>&minus;2i/d</sup> &emsp; for &ensp; i = 0, 1, &hellip;, d/2 &minus; 1</div>
+
+<p>Low-index dimensions rotate fast (capturing fine position differences); high-index dimensions rotate
+slowly (capturing broad positional relationships).</p>
+
+
+<h3>2.2 Why Rotation Enables Exact Re-Positioning</h3>
+
+<p>The key algebraic properties of rotation matrices:</p>
+
+<div class="callout callout-proof">
+  <strong>Property 1 &mdash; Composability (group structure)</strong>
+  <div class="math-block-left">R(&theta;<sub>1</sub>) &middot; R(&theta;<sub>2</sub>) = R(&theta;<sub>1</sub> + &theta;<sub>2</sub>)</div>
+  <p>Rotating by &theta;<sub>1</sub> then &theta;<sub>2</sub> equals rotating by their sum. This holds per 2&times;2 block
+  because cos/sin obey the angle-addition identities:
+  cos(a+b) = cos(a)cos(b) &minus; sin(a)sin(b) and sin(a+b) = sin(a)cos(b) + cos(a)sin(b).</p>
+</div>
+
+<div class="callout callout-proof">
+  <strong>Property 2 &mdash; Invertibility</strong>
+  <div class="math-block-left">R(&theta;)<sup>&minus;1</sup> = R(&minus;&theta;) = R(&theta;)<sup>T</sup></div>
+  <p>Every rotation can be undone by rotating in the opposite direction. Equivalently, rotation matrices
+  are orthogonal: R<sup>T</sup>R = I.</p>
+</div>
+
+<div class="callout callout-proof">
+  <strong>Property 3 &mdash; Norm Preservation (critical for QK-Norm compatibility)</strong>
+  <div class="math-block-left">&Vert;R(&theta;) &middot; x&Vert;<sub>2</sub> = &Vert;x&Vert;<sub>2</sub> &emsp; for all &theta;, x</div>
+  <p>Rotation does not change the length of any vector. This is because R is orthogonal:
+  &Vert;Rx&Vert;&sup2; = (Rx)<sup>T</sup>(Rx) = x<sup>T</sup>R<sup>T</sup>Rx = x<sup>T</sup>Ix = &Vert;x&Vert;&sup2;.</p>
+  <p><em>This property is why QK-Norm (L2 normalization) does not interfere with RoPE &mdash; see Section 4.2.</em></p>
+</div>
+
+<h3>2.3 The Re-Rotation Formula</h3>
+
+<p>If we store the <strong>unrotated</strong> key vector <span class="math">K<sub>base</sub> = W<sub>k</sub> &middot; h</span>
+(hidden state projected to key space, before any positional encoding), we can position it anywhere:</p>
+
+<div class="step-box">
+  <strong>Step 1: Encode at local position p<sub>old</sub></strong>
+  <div class="math-block-left">K<sub>cached</sub> = R(p<sub>old</sub>&theta;) &middot; K<sub>base</sub></div>
+</div>
+
+<div class="step-box">
+  <strong>Step 2: Move from p<sub>old</sub> to p<sub>new</sub></strong>
+  <div class="math-block-left">
+    K<sub>new</sub> = R(p<sub>new</sub>&theta;) &middot; K<sub>base</sub>
+  </div>
+  <p style="margin: 0.4em 0;">Substituting K<sub>base</sub> = R(&minus;p<sub>old</sub>&theta;) &middot; K<sub>cached</sub>
+  (by invertibility, Property 2) and applying composability (Property 1):</p>
+  <div class="math-block-left">
+    K<sub>new</sub> = R(p<sub>new</sub>&theta;) &middot; R(&minus;p<sub>old</sub>&theta;) &middot; K<sub>cached</sub>
+    = R((p<sub>new</sub> &minus; p<sub>old</sub>)&theta;) &middot; K<sub>cached</sub>
+  </div>
+  <p style="margin: 0.4em 0;">A single rotation by the position <em>difference</em> moves a cached key to its new position.
+  No need to actually store K<sub>base</sub>; storing K<sub>cached</sub> at any chosen reference position p<sub>old</sub>
+  is equivalent.</p>
+</div>
+
+<p>The derivation uses composability (Property 1) and invertibility (Property 2).
+This is <strong>exact &mdash; no approximation</strong>. A sentence&rsquo;s KV cache is position-neutral and can be
+slotted into any location in any document by a single rotation.</p>
+
+
+<!-- ═══════════════════════════ SECTION 3 ═══════════════════════════ -->
+<h2>3. Two Implementation Paths</h2>
+
+<div class="two-col">
+  <div class="col-card">
+    <h3>&#128295; Path 1: Retrofit Fine-Tuning</h3>
+    <p>Replace softmax with <strong>Denominator-Tracked ReLU&sup2; + QK-Norm</strong> and fine-tune an existing
+    model (Llama, Qwen). Converts sequential residual to parallel residual. The four-component
+    architecture (&sect;4) eliminates both the softmax denominator problem and LayerNorm leakage
+    simultaneously &mdash; no separate correction model needed.</p>
+    <p><strong>Target:</strong> &le;1% accuracy drop vs. full encoding, 90%+ TTFT speedup.</p>
+  </div>
+  <div class="col-card">
+    <h3>&#128640; Path 2: Native HRoPE Training</h3>
+    <p>Train new models from scratch with hierarchical position awareness, ReLU&sup2;-native attention,
+    and parallel residual blocks. Enables true O(&Delta;) inference and 10&ndash;20&times; context extrapolation.</p>
+    <p><strong>Ultimate goal:</strong> match or exceed standard softmax accuracy with 100&times;+ faster editing.</p>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════ SECTION 4 ═══════════════════════════ -->
+<h2>4. The Four-Component Architecture</h2>
+
+<p>Previous versions used &ldquo;ReLU + renormalization&rdquo; (v3, undefined) or ReLU + 50M correction model (v3).
+This architecture replaces all of that with four interlocking components where stitching is
+<strong>provably exact</strong> at the attention level, and hidden-state divergence is bounded to negligible
+levels through the layers.</p>
+
+
+<!-- ──────── 4.1 ──────── -->
+<h3>4.1 Component 1: Denominator-Tracked ReLU&sup2; Attention</h3>
+
+<h4>The problem with softmax stitching</h4>
+
+<p>Standard softmax attention for a query <span class="math">q</span> attending to <span class="math">n</span> keys:</p>
+
+<div class="math-block">
+  Attn<sub>softmax</sub>(q, K, V) = &sum;<sub>i=1</sub><sup>n</sup>
+  <span style="font-size:1.2em;">(</span>
+    e<sup>q<sup>T</sup>k<sub>i</sub></sup> / &sum;<sub>j=1</sub><sup>n</sup> e<sup>q<sup>T</sup>k<sub>j</sub></sup>
+  <span style="font-size:1.2em;">)</span>
+  v<sub>i</sub>
+</div>
+
+<p>The denominator <span class="math">Z<sub>A&cup;B</sub> = &sum;<sub>j&isin;A&cup;B</sub> exp(q<sup>T</sup>k<sub>j</sub>)</span>
+is a <strong>global sum over all keys</strong>. The numerator is linear and decomposes cleanly,
+<span class="math">&sum;<sub>i&isin;A&cup;B</sub> e<sup>q<sup>T</sup>k<sub>i</sub></sup> v<sub>i</sub> =
+&sum;<sub>i&isin;A</sub> e<sup>q<sup>T</sup>k<sub>i</sub></sup> v<sub>i</sub> +
+&sum;<sub>i&isin;B</sub> e<sup>q<sup>T</sup>k<sub>i</sub></sup> v<sub>i</sub></span>,
+and so does the denominator (Z<sub>A&cup;B</sub> = Z<sub>A</sub> + Z<sub>B</sub>).
+But if each segment is normalized <em>locally</em> before being added together,</p>
+
+<div class="math-block-left">
+  <span class="math-label">(broken)</span>
+  &sum;<sub>i&isin;A</sub> (e<sup>q<sup>T</sup>k<sub>i</sub></sup> / Z<sub>A</sub>) v<sub>i</sub>
+  &ensp;+&ensp;
+  &sum;<sub>i&isin;B</sub> (e<sup>q<sup>T</sup>k<sub>i</sub></sup> / Z<sub>B</sub>) v<sub>i</sub>
+  &ensp;&ne;&ensp;
+  &sum;<sub>i&isin;A&cup;B</sub> (e<sup>q<sup>T</sup>k<sub>i</sub></sup> / Z<sub>A&cup;B</sub>) v<sub>i</sub>
+</div>
+
+<p>because each per-key weight w<sub>i</sub> = e<sup>q<sup>T</sup>k<sub>i</sub></sup> ends up
+divided by Z<sub>A</sub> or Z<sub>B</sub> rather than by Z<sub>A</sub> + Z<sub>B</sub>. The fix &mdash; used by FlashAttention&rsquo;s
+online softmax &mdash; is to track Z<sub>A</sub>, Z<sub>B</sub> and re-weight at merge time, but that requires
+running attention <em>at merge time</em>, defeating the goal of pre-computed segment outputs. This is the
+fundamental barrier to exact softmax stitching from cached, already-normalized segment outputs.</p>
+
+
+<h4>ReLU&sup2; attention: the decomposable alternative</h4>
+
+<p>Replace softmax with squared ReLU:</p>
+
+<div class="math-block">
+  <span class="math-label">Definition.</span>
+  Attn(q, K, V) =
+  <span style="font-size:1.1em;">&sum;<sub>i</sub> &phi;(q<sup>T</sup>k<sub>i</sub>) &middot; v<sub>i</sub></span>
+  &ensp;/&ensp;
+  <span style="font-size:1.1em;">(&sum;<sub>i</sub> &phi;(q<sup>T</sup>k<sub>i</sub>) + &epsilon;)</span>
+</div>
+
+<p>where <span class="math">&phi;(z) = max(0, z)&sup2;</span> and <span class="math">&epsilon; = 10<sup>&minus;6</sup></span>.</p>
+
+<h4>Why ReLU&sup2;?</h4>
+<table>
+  <tr><th>Property</th><th>Softmax</th><th>ReLU</th><th>ReLU&sup2; (ours)</th></tr>
+  <tr><td>Non-negative weights</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+  <tr><td>Sparse (kills negatives)</td><td>&#10007; (all positive)</td><td>&#10003;</td><td>&#10003;</td></tr>
+  <tr><td>Smooth gradient at zero</td><td>&#10003;</td><td>&#10007; (discontinuous)</td><td>&#10003; (derivative = 2z, continuous)</td></tr>
+  <tr><td>Decomposable stitching</td><td>&#10007;</td><td>&#10003; (unnormalized)</td><td>&#10003; (with denom tracking)</td></tr>
+  <tr><td>Empirical quality</td><td>Baseline</td><td>~95% of softmax</td><td>~99% of softmax (Google Primer)</td></tr>
+</table>
+
+
+<h4>Proof of Exact Decomposability</h4>
+
+<div class="callout callout-proof">
+  <strong>Theorem (Stitching Exactness)</strong>
+  <p>For any partition of keys into segments {S<sub>1</sub>, &hellip;, S<sub>m</sub>},
+  the normalized ReLU&sup2; attention output can be reconstructed exactly from per-segment sufficient statistics.</p>
+
+  <p><em>Proof.</em> Define per-segment quantities:</p>
+  <div class="math-block-left">
+    N<sub>j</sub>(q) := &sum;<sub>i&isin;S<sub>j</sub></sub> &phi;(q<sup>T</sup>k<sub>i</sub>) &middot; v<sub>i</sub>
+    &ensp;&isin; &Ropf;<sup>d<sub>v</sub></sup>
+    &emsp;&emsp;(numerator partial sum)
+  </div>
+  <div class="math-block-left">
+    D<sub>j</sub>(q) := &sum;<sub>i&isin;S<sub>j</sub></sub> &phi;(q<sup>T</sup>k<sub>i</sub>)
+    &ensp;&isin; &Ropf;
+    &emsp;&emsp;&emsp;&emsp;&emsp;(denominator partial sum)
+  </div>
+
+  <p>Since &phi; is applied <em>elementwise</em> to each score q<sup>T</sup>k<sub>i</sub> independently,
+  summing over S<sub>j</sub> involves only the keys in that segment. Now observe:</p>
+
+  <div class="math-block-left">
+    &sum;<sub>i&isin;A&cup;B</sub> &phi;(q<sup>T</sup>k<sub>i</sub>) v<sub>i</sub>
+    = &sum;<sub>i&isin;A</sub> &phi;(q<sup>T</sup>k<sub>i</sub>) v<sub>i</sub>
+    + &sum;<sub>i&isin;B</sub> &phi;(q<sup>T</sup>k<sub>i</sub>) v<sub>i</sub>
+    = N<sub>A</sub>(q) + N<sub>B</sub>(q)
+  </div>
+
+  <div class="math-block-left">
+    &sum;<sub>i&isin;A&cup;B</sub> &phi;(q<sup>T</sup>k<sub>i</sub>)
+    = D<sub>A</sub>(q) + D<sub>B</sub>(q)
+  </div>
+
+  <p>Therefore:</p>
+
+  <div class="math-block">
+    Attn(q, K<sub>A&cup;B</sub>, V<sub>A&cup;B</sub>)
+    = (N<sub>A</sub> + N<sub>B</sub>) / (D<sub>A</sub> + D<sub>B</sub> + &epsilon;)
+  </div>
+
+  <p>Generalizing to <em>m</em> segments:</p>
+
+  <div class="math-block">
+    Attn(q, K, V) = &sum;<sub>j=1</sub><sup>m</sup> N<sub>j</sub>(q)
+    &ensp;/&ensp;
+    (&sum;<sub>j=1</sub><sup>m</sup> D<sub>j</sub>(q) + &epsilon;)
+  </div>
+
+  <p>Each (N<sub>j</sub>, D<sub>j</sub>) depends only on q and segment S<sub>j</sub>&rsquo;s cached (K, V).
+  Combination is addition of vectors/scalars plus one division. <strong>No approximation.</strong> &#9632;</p>
+</div>
+
+<div class="callout callout-warn">
+  <strong>&#9888;&#65039; Important Qualification (from v5 review)</strong>
+  <p>The decomposition above is <strong>exact given the same query q</strong>. In practice, the query q at layer <em>l</em>
+  is computed from the hidden state at layer <em>l&minus;1</em>, which itself depends on earlier attention results.
+  When segments are encoded independently, these hidden states diverge slightly from joint encoding.</p>
+  <p>This divergence accumulates with depth at a per-layer factor
+  &rho; = 1 + &alpha;C + &beta;L<sub>F</sub> (Section 4.3), which is substantially smaller than the
+  corresponding factor for sequential residual blocks. The micro-correction gate (Section 4.4) absorbs
+  the residual gap. The combined claim is bounded&mdash;not zero&mdash;hidden-state divergence; empirical
+  validation is required.</p>
+</div>
+
+<h4>Why this works with RoPE re-rotation</h4>
+
+<p>At stitching time, each cached key is re-rotated to its global position before computing scores:</p>
+<div class="math-block-left">
+  k<sub>i</sub><sup>global</sup> = R(p<sub>i</sub><sup>global</sup>&theta;) &middot; k<sub>i</sub><sup>base</sup>
+</div>
+<p>The score &phi;(q<sup>T</sup>k<sub>i</sub><sup>global</sup>) is computed per-key after re-rotation.
+Since re-rotation is per-key and happens before the dot product, the decomposition is unaffected.
+Each segment&rsquo;s (N<sub>j</sub>, D<sub>j</sub>) uses its own re-rotated keys.</p>
+
+
+<!-- ──────── 4.2 ──────── -->
+<h3>4.2 Component 2: QK-Norm (Logit Bounding)</h3>
+
+<p>Normalize queries and keys to unit vectors before computing attention scores:</p>
+
+<div class="math-block">
+  q&#770; = q / &Vert;q&Vert;<sub>2</sub>
+  &emsp;&emsp;
+  k&#770; = k / &Vert;k&Vert;<sub>2</sub>
+  &emsp;&emsp;
+  score = &tau; &middot; q&#770;<sup>T</sup>k&#770;
+</div>
+
+<p>where <span class="math">&tau;</span> is a <strong>learned per-head temperature scalar</strong> (initialized to &radic;d<sub>head</sub>).</p>
+
+
+<h4>Proof: QK-Norm preserves RoPE&rsquo;s relative position encoding</h4>
+
+<div class="callout callout-proof">
+  <strong>Theorem (QK-Norm &perp; RoPE compatibility)</strong>
+  <p>L2 normalization of Q and K after RoPE does not destroy the relative position information
+  encoded by RoPE.</p>
+
+  <p><em>Proof.</em> Let <span class="math">q<sub>raw</sub> = W<sub>q</sub> h<sub>q</sub></span> and
+  <span class="math">k<sub>raw</sub> = W<sub>k</sub> h<sub>k</sub></span> be the pre-RoPE projections.
+  After RoPE at positions p<sub>q</sub> and p<sub>k</sub>:</p>
+
+  <div class="math-block-left">
+    q = R(p<sub>q</sub>&theta;) &middot; q<sub>raw</sub>
+    &emsp;&emsp;
+    k = R(p<sub>k</sub>&theta;) &middot; k<sub>raw</sub>
+  </div>
+
+  <p>By Property 3 (norm preservation), rotation does not change vector norms:</p>
+
+  <div class="math-block-left">
+    &Vert;q&Vert;<sub>2</sub> = &Vert;R(p<sub>q</sub>&theta;) &middot; q<sub>raw</sub>&Vert;<sub>2</sub> = &Vert;q<sub>raw</sub>&Vert;<sub>2</sub>
+    &emsp;(position-independent!)
+  </div>
+
+  <p>Therefore, the L2-normalized dot product is:</p>
+
+  <div class="math-block-left">
+    q&#770;<sup>T</sup>k&#770;
+    = (q / &Vert;q&Vert;)<sup>T</sup> (k / &Vert;k&Vert;)
+    = q<sup>T</sup>k / (&Vert;q<sub>raw</sub>&Vert; &middot; &Vert;k<sub>raw</sub>&Vert;)
+  </div>
+
+  <p>Now expand q<sup>T</sup>k using the rotation:</p>
+
+  <div class="math-block-left">
+    q<sup>T</sup>k
+    = q<sub>raw</sub><sup>T</sup> R(p<sub>q</sub>&theta;)<sup>T</sup> R(p<sub>k</sub>&theta;) k<sub>raw</sub>
+    = q<sub>raw</sub><sup>T</sup> R((p<sub>k</sub> &minus; p<sub>q</sub>)&theta;) k<sub>raw</sub>
+  </div>
+
+  <p>Substituting back:</p>
+
+  <div class="math-block">
+    q&#770;<sup>T</sup>k&#770;
+    = q<sub>raw</sub><sup>T</sup> R(&Delta;p &middot; &theta;) k<sub>raw</sub>
+    &ensp;/&ensp;
+    (&Vert;q<sub>raw</sub>&Vert; &middot; &Vert;k<sub>raw</sub>&Vert;)
+  </div>
+
+  <p>The <strong>relative position term R(&Delta;p &middot; &theta;)</strong> is fully preserved. L2 normalization divides by
+  &Vert;q<sub>raw</sub>&Vert; and &Vert;k<sub>raw</sub>&Vert;, which are <em>position-independent</em> quantities
+  (they depend on content <span class="math">h<sub>q</sub>, h<sub>k</sub></span> but not on
+  positions <span class="math">p<sub>q</sub>, p<sub>k</sub></span>). The relative position encoding is intact. &#9632;</p>
+</div>
+
+<div class="callout callout-warn">
+  <strong>&#9888;&#65039; Note on v5&rsquo;s RMSNorm alternative</strong>
+  <p>The v5 revision replaced QK-Norm with RMSNorm, claiming L2 normalization &ldquo;destroys RoPE&rsquo;s
+  relative distance property.&rdquo; This claim is <strong>incorrect</strong>, as proven above.
+  Moreover, the <em>gain-less</em> form RMSNorm(x) = x/RMS(x) = x/(&Vert;x&Vert;/&radic;d) = &radic;d &middot; x/&Vert;x&Vert;
+  is mathematically equivalent to L2 normalization scaled by &radic;d, with the scale factor absorbed by
+  the learned temperature &tau;.
+  <strong>Caveat:</strong> the standard RMSNorm in Llama / HF (with a learned per-dimension gain &gamma;)
+  applies an element-wise rescale &gamma; &odot; (x/RMS(x)) that is <em>not</em> norm-preserving, and would
+  break the proof. We therefore use <em>gain-less</em> L2 normalization for QK-Norm specifically; the
+  pre-attention RMSNorm on hidden states retains its &gamma;.</p>
+</div>
+
+
+<h4>Why QK-Norm helps stitching</h4>
+
+<ul>
+  <li><strong>Bounded logits:</strong> All attention scores lie in [&minus;&tau;, +&tau;], regardless of hidden state magnitude.
+  When a chunk is encoded independently (missing cross-chunk context), its hidden states may have different
+  norms. Without QK-Norm, this magnitude difference directly corrupts attention scores. With QK-Norm,
+  only the <em>direction</em> matters &mdash; direction is far more robust to missing context.</li>
+  <li><strong>Temperature is learned, not data-dependent:</strong> &tau; is a fixed parameter per head, not computed
+  from the input. It introduces zero stitching error.</li>
+  <li><strong>Production-validated:</strong> QK-Norm is used in Meta&rsquo;s Chameleon and Google&rsquo;s ViT-22B. It stabilizes
+  training and reduces attention entropy variance &mdash; both critical for cache stitching.</li>
+</ul>
+
+
+<!-- ──────── 4.3 ──────── -->
+<h3>4.3 Component 3: Parallel Residual Blocks (Error Isolation)</h3>
+
+<h4>The error propagation problem</h4>
+
+<p>In a standard <strong>sequential</strong> transformer block:</p>
+<pre><code>x = x + Attn(RMSNorm(x))           # attention output
+x = x + FFN(RMSNorm(x))            # FFN input DEPENDS on attention output</code></pre>
+
+<p>The FFN input is the attention output. When attention is wrong (missing cross-segment context), the
+error flows through FFN, altering the hidden state, which feeds into the next layer&rsquo;s attention,
+which feeds into the next layer&rsquo;s FFN, and so on. Over L layers, errors compound.</p>
+
+<h4>Parallel residual: decoupling FFN from attention</h4>
+
+<p>The <strong>parallel</strong> form (used in PaLM-540B and Gemma) computes both from the <em>same</em> input:</p>
+<pre><code>h = RMSNorm(x)
+x = x + &alpha; &middot; Attn(h) + &beta; &middot; FFN(h)    # both computed from SAME normalized input</code></pre>
+
+<p>where <span class="math">&alpha;, &beta;</span> are <strong>learned per-layer scalars</strong> (initialized to 0.5 each).</p>
+
+
+<h4>Error propagation analysis</h4>
+
+<p>Let <span class="math">&delta;<sub>l</sub> = x<sub>l</sub><sup>indep</sup> &minus; x<sub>l</sub><sup>joint</sup></span>
+be the hidden-state difference at layer <em>l</em> between independent-segment and joint encoding.
+The attention error at layer <em>l</em> decomposes into two parts:</p>
+
+<ul>
+  <li><strong>Propagation term</strong> &mdash; the part of &Delta;Attn<sub>l</sub> caused by &delta;<sub>l</sub> being
+  fed into Q (and into K, V at layers above <em>l</em>): bounded by C &middot; &Vert;&delta;<sub>l</sub>&Vert;
+  for a Lipschitz constant C, where C is small thanks to QK-Norm
+  (logits &isin; [&minus;&tau;, &tau;]).</li>
+  <li><strong>Injection term</strong> &mdash; the part caused by attending only to in-segment keys/values rather than
+  all keys/values: a fresh, &delta;<sub>l</sub>-independent error &epsilon;<sub>l</sub> with
+  &Vert;&epsilon;<sub>l</sub>&Vert; &le; E for some E that QK-Norm again bounds (since both attention outputs
+  are convex combinations of V vectors with bounded weights).</li>
+</ul>
+
+<div class="callout callout-proof">
+  <strong>Bound: parallel residual avoids FFN amplification of attention error</strong>
+
+  <p>In a <strong>sequential</strong> block, the FFN at layer <em>l</em> sees the corrupted
+  post-attention state, so</p>
+  <div class="math-block-left">
+    &delta;<sub>l+1</sub><sup>seq</sup> = &delta;<sub>l</sub> + &Delta;Attn<sub>l</sub>
+    + &bigl[FFN(&delta;<sub>l</sub> + &Delta;Attn<sub>l</sub>) &minus; FFN(0)&bigr]
+  </div>
+  <p>and the FFN&rsquo;s Lipschitz constant L<sub>F</sub> multiplies the attention error too. Per-layer
+  amplification is roughly (1 + C)(1 + L<sub>F</sub>), which compounds over depth.</p>
+
+  <p>In a <strong>parallel</strong> block, the FFN sees the <em>same</em> RMSNorm(x<sub>l</sub>) as attention
+  and is unaffected by &Delta;Attn<sub>l</sub>:</p>
+  <div class="math-block-left">
+    &delta;<sub>l+1</sub><sup>par</sup>
+    = &delta;<sub>l</sub> + &alpha;<sub>l</sub> &middot; &Delta;Attn<sub>l</sub> + &beta;<sub>l</sub> &middot; &Delta;FFN<sub>l</sub>
+  </div>
+  <p>where &Delta;FFN<sub>l</sub> depends only on &delta;<sub>l</sub> (FFN&rsquo;s sensitivity to its
+  own input), bounded by L<sub>F</sub> &middot; &Vert;&delta;<sub>l</sub>&Vert;. Substituting the attention
+  decomposition gives the recurrence</p>
+  <div class="math-block-left">
+    &Vert;&delta;<sub>l+1</sub><sup>par</sup>&Vert;
+    &le; (1 + &alpha;C + &beta;L<sub>F</sub>) &middot; &Vert;&delta;<sub>l</sub>&Vert; + &alpha; &middot; E.
+  </div>
+  <p>Let &rho; = 1 + &alpha;C + &beta;L<sub>F</sub>. Solving the linear recurrence with &delta;<sub>0</sub> = 0
+  (the input embeddings are identical for independent and joint encoding) gives</p>
+  <div class="math-block">
+    &Vert;&delta;<sub>L</sub><sup>par</sup>&Vert;
+    &le; &alpha; &middot; E &middot;
+    <span style="font-size:1.15em;">(</span>&rho;<sup>L</sup> &minus; 1<span style="font-size:1.15em;">)</span>
+    / (&rho; &minus; 1).
+  </div>
+  <p>This is <strong>bounded growth</strong>, not decay: the divergence accumulates with depth, but the
+  per-layer factor &rho; is much smaller than its sequential counterpart
+  (1 + C)(1 + L<sub>F</sub>) because &alpha;, &beta; &lt; 1 weight the contributions and decouple
+  attention error from FFN. With &alpha; &asymp; &beta; &asymp; 0.3, C &asymp; 1, L<sub>F</sub> &asymp; 1 we get
+  &rho;<sup>par</sup> &asymp; 1.6 vs. &rho;<sup>seq</sup> &asymp; 4.0 per layer.</p>
+
+  <p>The micro-correction gate (&sect;4.4) then closes the residual gap. Empirical validation of these
+  Lipschitz constants on a trained model is required; the bound above is an architectural argument,
+  not a quality guarantee. &#9632;</p>
+</div>
+
+<table>
+  <tr><th>Property</th><th>Sequential Residual</th><th>Parallel Residual (ours)</th></tr>
+  <tr><td>FFN depends on attention output?</td><td>Yes</td><td><strong>No</strong> &mdash; same input as attention</td></tr>
+  <tr>
+    <td>Per-layer error amplification factor</td>
+    <td>~(1 + C)(1 + L<sub>F</sub>)</td>
+    <td><strong>1 + &alpha;C + &beta;L<sub>F</sub></strong> &mdash; smaller because &alpha;, &beta; &lt; 1 and
+    attention/FFN errors no longer multiply</td>
+  </tr>
+  <tr>
+    <td>Qualitative role of FFN branch</td>
+    <td>FFN amplifies attention errors at every layer</td>
+    <td><strong>FFN branch is insulated from attention error</strong>: it contributes a content-derived
+    component to every token&rsquo;s hidden state, stabilizing representations even when attention misses
+    cross-segment information. The learned &beta; controls how much weight the FFN branch carries.</td>
+  </tr>
+</table>
+
+
+<!-- ──────── 4.4 ──────── -->
+<h3>4.4 Component 4: Micro-Correction Gates</h3>
+
+<p>Components 1&ndash;3 already make the dominant error terms negligible. For any small residual divergence,
+we store lightweight statistics alongside each segment&rsquo;s KV cache and apply a correction gate at
+stitching time.</p>
+
+<h4>Cached per-segment statistics</h4>
+
+<p>Per segment <span class="math">S</span>, per layer <span class="math">l</span>, per head <span class="math">h</span>,
+store two vectors:</p>
+
+<div class="math-block-left">
+  &mu;<sub>s</sub><sup>(l,h)</sup> = (1/|S|) &sum;<sub>i&isin;S</sub> k<sub>i</sub><sup>(l,h)</sup> &isin; &Ropf;<sup>d<sub>head</sub></sup>
+  &emsp;&emsp;(mean of key vectors)
+</div>
+<div class="math-block-left">
+  &sigma;<sub>s</sub><sup>(l,h)</sup> = std<sub>i&isin;S</sub>(k<sub>i</sub><sup>(l,h)</sup>) &isin; &Ropf;<sup>d<sub>head</sub></sup>
+  &emsp;&emsp;(standard deviation of key vectors)
+</div>
+
+<p><strong>Storage overhead</strong> for a 32-layer, 32-head, d<sub>head</sub>=128 model:<br>
+2 vectors &times; 32 layers &times; 32 heads &times; 128 dims &times; 2 bytes (bf16) = <strong>~0.5 MB per segment</strong>.
+Negligible vs. the KV cache itself (typically 50&ndash;200 MB per segment).</p>
+
+
+<h4>Two gate options</h4>
+
+<p>We offer a scalar gate (simpler, fewer params) and a vector gate (more expressive) depending on
+the accuracy/simplicity tradeoff desired:</p>
+
+<table>
+  <tr><th></th><th>Option A: Scalar Gate</th><th>Option B: Vector Gate</th></tr>
+  <tr><td>Gate output</td><td>One scalar per head per layer</td><td>One vector &isin; &Ropf;<sup>d<sub>head</sub></sup> per head per layer</td></tr>
+  <tr>
+    <td>Parameters per layer</td>
+    <td><code>w<sub>g</sub> &isin; &Ropf;<sup>H&times;2d<sub>head</sub></sup>, b<sub>g</sub> &isin; &Ropf;<sup>H</sup></code><br>
+        = 32 &times; (256+1) = <strong>~8K</strong></td>
+    <td><code>W<sub>g</sub> &isin; &Ropf;<sup>H&times;d<sub>head</sub>&times;2d<sub>head</sub></sup>, b<sub>g</sub> &isin; &Ropf;<sup>H&times;d<sub>head</sub></sup></code><br>
+        = 32 &times; 128 &times; (256+1) = <strong>~1M</strong></td>
+  </tr>
+  <tr><td>Total (32 layers)</td><td><strong>~260K</strong></td><td><strong>~33M</strong></td></tr>
+  <tr><td>Expressiveness</td><td>Scales entire head output up/down</td><td>Can correct individual dimensions</td></tr>
+  <tr><td>When to use</td><td>Default; sufficient when residual divergence is small</td><td>When accuracy gap exceeds ~0.5%</td></tr>
+</table>
+
+
+<h4>Scalar gate implementation (Option A, recommended default)</h4>
+<pre><code>def scalar_gate(seg_stats_pairs, w_gate, b_gate):
+    """
+    seg_stats_pairs: (batch, n_heads, 2*d_head)
+        concatenation of (mu_i - mu_j) and log(sigma_i / sigma_j)
+        averaged over all adjacent segment pairs
+    w_gate: (n_heads, 2*d_head) per layer
+    b_gate: (n_heads,) per layer
+    Returns: (batch, n_heads, 1, 1) broadcast-ready gate
+    """
+    # Contract over feature dim -> one scalar per head
+    logit = torch.einsum('bhf,hf->bh', seg_stats_pairs, w_gate) + b_gate
+    gate = torch.sigmoid(logit)                    # (batch, n_heads)
+    return gate.unsqueeze(-1).unsqueeze(-1)        # (batch, n_heads, 1, 1)
+
+# Usage in forward:
+# attn_out shape: (batch, n_heads, seq_len, d_head)
+# attn_out = attn_out * scalar_gate(seg_stats, self.w_gate, self.b_gate)</code></pre>
+
+
+<h4>Vector gate implementation (Option B, higher fidelity)</h4>
+<pre><code>def vector_gate(seg_stats_pairs, W_gate, b_gate):
+    """
+    seg_stats_pairs: (batch, n_heads, 2*d_head)
+    W_gate: (n_heads, d_head, 2*d_head) per layer
+    b_gate: (n_heads, d_head) per layer
+    Returns: (batch, n_heads, 1, d_head) broadcast-ready gate
+    """
+    logit = torch.einsum('bhf,hdf->bhd', seg_stats_pairs, W_gate) + b_gate
+    gate = torch.sigmoid(logit)                    # (batch, n_heads, d_head)
+    return gate.unsqueeze(2)                       # (batch, n_heads, 1, d_head)
+
+# Usage: attn_out = attn_out * vector_gate(seg_stats, self.W_gate, self.b_gate)</code></pre>
+
+<p><strong>Segment statistics preprocessing</strong> (computed once <em>per layer</em> at stitch time;
+the per-layer cached statistics are stacked, then reduced across adjacent segment pairs):</p>
+<pre><code>def compute_seg_stats_pairs(seg_stats_list):
+    """
+    seg_stats_list: list of m (mu, sigma) tuples for ONE layer,
+                    each tensor shaped (n_heads, d_head).
+                    mu, sigma are computed over BASE (pre-RoPE) keys, so
+                    they are position-independent and reusable.
+    Returns: (n_heads, 2*d_head) -- averaged pairwise features for this layer.
+    """
+    deltas = []
+    for i in range(len(seg_stats_list) - 1):
+        mu_i, sigma_i = seg_stats_list[i]
+        mu_j, sigma_j = seg_stats_list[i + 1]
+        delta_mu = mu_i - mu_j                                 # (n_heads, d_head)
+        # log-ratio rather than ratio: bounded as either sigma -> 0,
+        # symmetric around 0, and stable in bf16.
+        log_sigma_ratio = torch.log((sigma_i + 1e-6) / (sigma_j + 1e-6))
+        deltas.append(torch.cat([delta_mu, log_sigma_ratio], dim=-1))
+    return torch.stack(deltas).mean(dim=0)                     # (n_heads, 2*d_head)</code></pre>
+
+<p>This is called once per layer; the per-layer outputs are passed into each <code>HRoPEBlock.forward</code>
+as the <code>seg_stats</code> argument (see &sect;5).</p>
+
+
+<!-- ──────── 4.5 ──────── -->
+<h3>4.5 Why This Eliminates LayerNorm Leakage</h3>
+
+<p>The v3 spec identified &ldquo;LayerNorm leakage&rdquo; as the drift in normalization statistics when stitching
+independently encoded segments. The v5.2 architecture eliminates this at four levels:</p>
+
+<table>
+  <tr><th>Level</th><th>Mechanism</th><th>Effect</th></tr>
+  <tr>
+    <td><strong>Normalization</strong></td>
+    <td>RMSNorm in pre-norm position (before Q/K/V projection)</td>
+    <td>K, V are computed from RMSNormed hidden states <em>per segment</em>. Independent and joint encoding
+    will produce slightly different RMSNorm outputs (different cross-segment context shifts the hidden
+    state), but no <em>post-cache</em> normalization step is needed at stitch time &mdash; the normalization
+    happens inside each segment&rsquo;s forward pass and is amortized.</td>
+  </tr>
+  <tr>
+    <td><strong>Logit bounding</strong></td>
+    <td>QK-Norm constrains scores to [&minus;&tau;, +&tau;]</td>
+    <td>Hidden state magnitude differences (from missing cross-segment context) do not affect
+    attention scores. Only direction matters, and direction is robust.</td>
+  </tr>
+  <tr>
+    <td><strong>Error isolation</strong></td>
+    <td>Parallel residual decouples FFN from attention</td>
+    <td>The FFN branch is unaffected by attention errors. Per-layer amplification reduced from
+    ~(1+C)(1+L<sub>F</sub>) to 1 + &alpha;C + &beta;L<sub>F</sub>.</td>
+  </tr>
+  <tr>
+    <td><strong>Residual correction</strong></td>
+    <td>Cached segment statistics + micro-correction gate</td>
+    <td>Any remaining divergence corrected by a small learned gate (~260K or ~33M params total).</td>
+  </tr>
+</table>
+
+<div class="callout callout-success">
+  <strong>&#127919; Net result</strong>
+  The 50M-parameter correction model from v3 is <strong>eliminated</strong>. The architecture makes stitching
+  exact at the attention level and bounds hidden-state divergence to negligible levels through the layers,
+  with a tiny gate to handle residuals. Training is single-stage end-to-end.
+</div>
+
+
+<!-- ═══════════════════════════ SECTION 5 ═══════════════════════════ -->
+<h2>5. Complete HRoPE Transformer Layer</h2>
+
+<pre><code>class HRoPEBlock(nn.Module):
+    def __init__(self, d_model, n_heads, d_head, d_ff, gate_mode='scalar'):
+        super().__init__()
+        self.n_heads = n_heads
+        self.d_head = d_head
+        self.gate_mode = gate_mode
+
+        self.norm = RMSNorm(d_model)
+        self.W_q = nn.Linear(d_model, n_heads * d_head, bias=False)
+        self.W_k = nn.Linear(d_model, n_heads * d_head, bias=False)
+        self.W_v = nn.Linear(d_model, n_heads * d_head, bias=False)
+        self.W_o = nn.Linear(n_heads * d_head, d_model, bias=False)
+        self.tau = nn.Parameter(torch.ones(n_heads) * math.sqrt(d_head))
+        self.ffn = SwiGLU(d_model, d_ff)
+        self.alpha = nn.Parameter(torch.tensor(0.5))
+        self.beta  = nn.Parameter(torch.tensor(0.5))
+
+        # Micro-correction gate
+        gate_in = 2 * d_head  # features: delta_mu ++ sigma_ratio
+        if gate_mode == 'scalar':
+            self.w_gate = nn.Parameter(torch.zeros(n_heads, gate_in))
+            self.b_gate = nn.Parameter(torch.zeros(n_heads))
+        else:  # 'vector'
+            self.W_gate = nn.Parameter(torch.zeros(n_heads, d_head, gate_in))
+            self.b_gate = nn.Parameter(torch.zeros(n_heads, d_head))
+
+    def forward(self, x, rope_cos, rope_sin, causal_mask, seg_stats=None):
+        B, S, _ = x.shape
+        H, D = self.n_heads, self.d_head
+        h = self.norm(x)
+
+        Q = self.W_q(h).view(B, S, H, D).transpose(1, 2)  # (B, H, S, D)
+        K = self.W_k(h).view(B, S, H, D).transpose(1, 2)
+        V = self.W_v(h).view(B, S, H, D).transpose(1, 2)
+
+        # Apply RoPE (hierarchical positions)
+        Q = apply_rope(Q, rope_cos, rope_sin)
+        K = apply_rope(K, rope_cos, rope_sin)
+
+        # QK-Norm: project onto unit sphere, then scale by learned temperature
+        Q = Q / (Q.norm(dim=-1, keepdim=True) + 1e-6)
+        K = K / (K.norm(dim=-1, keepdim=True) + 1e-6)
+
+        # ReLU-squared attention with denominator tracking
+        scores = torch.einsum('bhsd,bhtd->bhst', Q, K)      # (B, H, S, S)
+        scores = scores * self.tau.view(1, H, 1, 1)         # scale by per-head temperature
+        # causal_mask: 0 for allowed positions, large negative (e.g. -1e4) for masked.
+        # We avoid -inf because clamp(min=0) of -inf is fine but downstream fused
+        # ops in bf16 can produce NaN; -1e4 is large enough that ReLU^2 zeros it out.
+        scores = scores + causal_mask                       # causal mask + ALiBi bias
+        weights = scores.clamp(min=0).square()              # phi(z) = ReLU(z)^2
+
+        denom = weights.sum(dim=-1, keepdim=True) + 1e-6    # (B, H, S, 1)
+        attn_out = (weights @ V) / denom                    # (B, H, S, D)
+
+        # Micro-correction gate (only when stitching cached segments).
+        # seg_stats is precomputed once at stitch time (see Section 4.4) with shape
+        # (H, 2*D); we broadcast it across the batch here.
+        if seg_stats is not None:
+            stats = seg_stats.unsqueeze(0).expand(B, -1, -1)        # (B, H, 2*D)
+            if self.gate_mode == 'scalar':
+                logit = torch.einsum('bhf,hf->bh', stats, self.w_gate) + self.b_gate
+                gate = torch.sigmoid(logit).unsqueeze(-1).unsqueeze(-1)  # (B,H,1,1)
+            else:
+                logit = torch.einsum('bhf,hdf->bhd', stats, self.W_gate) + self.b_gate
+                gate = torch.sigmoid(logit).unsqueeze(2)                 # (B,H,1,D)
+            attn_out = attn_out * gate
+
+        # Project back and parallel residual.
+        # Note: this implementation shares one RMSNorm `h` between attention and FFN.
+        # PaLM/Gemma use separate norms (norm_attn(x) and norm_ffn(x)); both are valid
+        # parallel-residual variants. Sharing keeps parameter count down.
+        attn_out = self.W_o(attn_out.transpose(1, 2).reshape(B, S, -1))
+        ffn_out = self.ffn(h)   # parallel: SAME input h as attention
+
+        return x + self.alpha * attn_out + self.beta * ffn_out</code></pre>
+
+
+<!-- ═══════════════════════════ SECTION 6 ═══════════════════════════ -->
+<h2>6. KV Cache Stitching Protocol</h2>
+
+<p>At inference time, stitching <span class="math">m</span> pre-encoded segments proceeds as:</p>
+
+<div class="step-box">
+  <strong>Phase A: Prepare cached KV (per segment, one-time)</strong>
+  <pre><code>Storage convention:
+  - K_base_s : pre-RoPE, pre-QK-Norm key projections (W_k * h)
+  - V_s      : value projections (W_v * h)
+  - mu_s, sigma_s : statistics over K_base_s (i.e., POSITION-INDEPENDENT,
+                   so they are reusable when the segment is moved)
+
+For each segment s = 1..m:
+    1. Load (K_base_s, V_s, mu_s, sigma_s) from storage
+    2. Re-rotate keys to their global positions:
+         K_rot_s = R((p_s_global) * theta) * K_base_s              # exact (Section 2.3)
+       (If K is cached already rotated to a local position p_s_local, use
+         K_rot_s = R((p_s_global - p_s_local) * theta) * K_cached_s
+       which is algebraically identical.)
+    3. QK-normalize keys:
+         K_s = K_rot_s / ||K_rot_s||_2 = K_rot_s / ||K_base_s||_2  # rotation preserves norm
+    4. Concatenate: K_full = [K_1 ; K_2 ; ... ; K_m]  along seq dim
+                    V_full = [V_1 ; V_2 ; ... ; V_m]
+
+  Compute seg_stats_pairs from {(mu_s, sigma_s)} (see Section 4.4)</code></pre>
+</div>
+
+<div class="step-box">
+  <strong>Phase B: Query-time attention (per new/edited token)</strong>
+  <pre><code>For each query token q:
+    5. Project & normalize: Q = QK_Norm(RoPE(W_q(RMSNorm(x_q))))
+    6. For each segment s, compute partial sums:
+         N_s = sum_i phi(tau * Q . K_s[i]) * V_s[i]     # numerator
+         D_s = sum_i phi(tau * Q . K_s[i])               # denominator
+    7. Combine exactly:
+         attn_out = (sum_s N_s) / (sum_s D_s + epsilon)  # EXACT decomposition
+    8. Apply micro-correction gate from seg_stats_pairs
+    9. Parallel residual:
+         x = x + alpha * W_o(attn_out) + beta * FFN(RMSNorm(x))</code></pre>
+</div>
+
+<div class="callout callout-success">
+  <strong>&#9989; Exactness guarantee (scope)</strong>
+  Step 7 produces the <strong>same output</strong> as computing attention over the full concatenated sequence
+  <em>given the same query q and the same K, V</em>. In practice the query at layer <em>l</em> and the
+  K, V at layer <em>l</em> &gt; 1 differ slightly between independent and joint encoding due to
+  hidden-state divergence in earlier layers. That divergence is bounded by the per-layer factor
+  &rho; = 1 + &alpha;C + &beta;L<sub>F</sub> derived in Section 4.3 (architectural bound, not a quality
+  guarantee &mdash; empirical validation required). The micro-correction gate (Step 8) absorbs the
+  residual gap.
+</div>
+
+
+<!-- ═══════════════════════════ SECTION 7 ═══════════════════════════ -->
+<h2>7. Mathematical Formulation: Two-Level Hierarchy</h2>
+
+<h3>7.1 Hierarchical Position Encoding</h3>
+
+<p>For a token at sentence index <span class="math">i</span> and token offset <span class="math">j</span> within
+that sentence, the RoPE angle for dimension pair <span class="math">k</span> is:</p>
+
+<div class="math-block">
+  &Theta;<sub>k</sub>(i, j) = &alpha;<sub>sent,k</sub> &middot; i + &alpha;<sub>token,k</sub> &middot; j
+</div>
+
+<p>where each <span class="math">&alpha;</span> is a <strong>per-dimension frequency vector</strong>
+<span class="math">&isin; &Ropf;<sup>d/2</sup></span>:</p>
+
+<ul>
+  <li><span class="math">&alpha;<sub>token,k</sub> = 10000<sup>&minus;2k/d</sup></span> &mdash; standard RoPE frequencies (token-level, fast rotation)</li>
+  <li><span class="math">&alpha;<sub>sent,k</sub> = &lambda; &middot; 10000<sup>&minus;2k/d</sup></span> &mdash; sentence-level frequencies (slow rotation)</li>
+</ul>
+
+<p>The sentence gap <span class="math">&lambda;</span> is a <strong>learned scalar</strong>, initialized to the average sentence
+length in the training corpus (typically 20&ndash;40 tokens). This ensures that adjacent sentences are
+separated by a rotation gap comparable to one sentence&rsquo;s worth of token positions.</p>
+
+<p>The attention score between tokens at <span class="math">(i, j)</span> and <span class="math">(i&prime;, j&prime;)</span>
+depends on the <em>difference</em> of their angles:</p>
+
+<div class="math-block">
+  &Delta;&Theta;<sub>k</sub> = &alpha;<sub>sent,k</sub>(i &minus; i&prime;) + &alpha;<sub>token,k</sub>(j &minus; j&prime;)
+</div>
+
+<p>This is a direct consequence of RoPE&rsquo;s composability (Section 2.2, Property 1).</p>
+
+
+<h3>7.2 Variable-Length Sentences</h3>
+
+<div class="math-block">
+  Document = [S<sub>1</sub>, S<sub>2</sub>, &hellip;, S<sub>N</sub>],
+  &emsp; S<sub>i</sub> = [t<sub>i,1</sub>, &hellip;, t<sub>i,L<sub>i</sub></sub>]
+</div>
+
+<ul>
+  <li><span class="math">N</span> &mdash; number of sentences (variable per document)</li>
+  <li><span class="math">L<sub>i</sub></span> &mdash; number of tokens in sentence <span class="math">i</span> (variable per sentence)</li>
+</ul>
+
+<p>No fixed sentence length is required. The hierarchical encoding adapts to the natural segmentation
+of the text.</p>
+
+
+<h3>7.3 ALiBi for Cross-Segment Bias (Global Order)</h3>
+
+<p>To encode global ordering across segments (beyond what RoPE captures through rotation), we add
+an ALiBi-style linear bias to the attention scores:</p>
+
+<div class="math-block">
+  score<sub>final</sub> = &tau; &middot; q&#770;<sup>T</sup>k&#770; &minus; m<sub>h</sub> &middot; |seg<sub>i</sub> &minus; seg<sub>j</sub>|
+</div>
+
+<p>where <span class="math">m<sub>h</sub> = 2<sup>&minus;8h/H</sup></span> is a per-head slope following ALiBi&rsquo;s geometric progression.
+This penalizes attention between distant segments, encouraging local coherence while
+still allowing long-range dependencies through the slower-decaying heads.</p>
+
+<div class="callout">
+  <strong>&#128218; Literature Reference</strong>
+  The 2025 BiPE (Bilevel Positional Encoding) paper validates mixing local RoPE with global ALiBi,
+  achieving 97% accuracy on arithmetic tasks vs. &lt;70% baseline.
+</div>
+
+
+<!-- ═══════════════════════════ SECTION 8 ═══════════════════════════ -->
+<h2>8. The Re-Rotation Kernel (Triton)</h2>
+
+<pre><code># Layout: INTERLEAVED RoPE pairs, i.e. K is laid out per token as
+#   [x_0, y_0, x_1, y_1, ..., x_{d/2-1}, y_{d/2-1}].
+# This differs from the HALVED layout used by Llama / HuggingFace
+#   ([x_0..x_{d/2-1}, y_0..y_{d/2-1}]).
+# The PyTorch reference (rope_utils.py) and the calling code MUST use the same
+# convention as this kernel; a converter is provided for Llama/Qwen weights.
+#
+# Launch grid: (seq_len, d_head // 2)   -- one program per (token, RoPE-pair).
+@triton.jit
+def rerotate_kv_kernel(K_base_ptr, K_out_ptr, start_pos, seq_len, d_head):
+    token_idx = tl.program_id(0)             # 0 .. seq_len - 1
+    pair_idx  = tl.program_id(1)             # 0 .. d_head/2 - 1  (indexes pairs, NOT dims)
+
+    # Standard RoPE frequencies: theta_i = 10000^(-2i/d) for pair index i.
+    theta = 10000.0 ** (-2.0 * pair_idx / d_head)
+    angle = (start_pos + token_idx) * theta  # per-token global position
+
+    cos_theta = tl.cos(angle)
+    sin_theta = tl.sin(angle)
+
+    offset = token_idx * d_head + pair_idx * 2
+    x = tl.load(K_base_ptr + offset)
+    y = tl.load(K_base_ptr + offset + 1)
+
+    tl.store(K_out_ptr + offset,     x * cos_theta - y * sin_theta)
+    tl.store(K_out_ptr + offset + 1, x * sin_theta + y * cos_theta)</code></pre>
+
+<div class="callout">
+  <strong>&#128221; Implementation notes</strong>
+  <ul style="margin: 0.4em 0 0 1.2em;">
+    <li>The v3 kernel had a bug: <code>angle = start_pos * theta</code> (same angle for all tokens in the
+    chunk). Fixed in v4+: <code>angle = (start_pos + token_idx) * theta</code> gives each token its own
+    global angle. The PyTorch reference (<code>rope_utils.py</code>) was always correct.</li>
+    <li><strong>Layout consistency is mandatory.</strong> This kernel uses the interleaved layout. When
+    integrating with Llama/Qwen weights (halved layout), the K projection output must be permuted into
+    interleaved form before this kernel runs &mdash; or, equivalently, write a halved-layout variant of the
+    kernel that loads <code>K[token_idx*d_head + pair_idx]</code> and
+    <code>K[token_idx*d_head + pair_idx + d_head/2]</code> as the (x, y) pair.</li>
+  </ul>
+</div>
+
+
+<!-- ═══════════════════════════ SECTION 9 ═══════════════════════════ -->
+<h2>9. LSH-Based Fuzzy Cache (SimHash)</h2>
+
+<pre><code>def simhash(sentence, hash_bits=64):
+    features = sentence.lower().split()
+    v = [0] * hash_bits
+    for f in features:
+        h = hashlib.md5(f.encode()).digest()
+        h_int = int.from_bytes(h, 'big')
+        for i in range(hash_bits):
+            if (h_int >> i) & 1:
+                v[i] += 1
+            else:
+                v[i] -= 1
+    signature = 0
+    for i in range(hash_bits):
+        if v[i] > 0:
+            signature |= (1 << i)
+    return signature
+
+# "The cat sat" -> 0x7f3a2b1c...
+# "The dog sat" -> 0x7f3a2b1d...  (Hamming distance = 1-2 bits)</code></pre>
+
+<p>Cache lookup: compute SimHash of the edited sentence, query the cache for entries with
+Hamming distance &le; 3 bits. If found, reuse the cached KV and re-rotate to the new position.
+If not, encode the sentence from scratch and store the result.</p>
+
+
+<!-- ═══════════════════════════ SECTION 10 ═══════════════════════════ -->
+<h2>10. Training Hyperparameters</h2>
+
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Rationale</th></tr>
+  <tr><td>Optimizer</td><td>AdamW (&beta;<sub>1</sub>=0.9, &beta;<sub>2</sub>=0.95, weight decay=0.1)</td><td>Standard for LLM pretraining</td></tr>
+  <tr><td>Peak learning rate</td><td>3&times;10<sup>&minus;4</sup></td><td>Standard for 1&ndash;7B models</td></tr>
+  <tr><td>LR schedule</td><td>Linear warmup + cosine decay</td><td></td></tr>
+  <tr><td>Warmup steps</td><td>2,000</td><td></td></tr>
+  <tr><td>Gradient clipping</td><td>1.0 (global norm)</td><td>Prevents ReLU&sup2; gradient spikes</td></tr>
+  <tr><td>Temperature &tau; init</td><td>&radic;d<sub>head</sub> per head</td><td>Matches softmax &radic;d scaling convention</td></tr>
+  <tr><td>Parallel residual &alpha;, &beta; init</td><td>0.5 each</td><td>Equal weighting; model learns optimal ratio</td></tr>
+  <tr><td>Micro-gate W init</td><td>Zeros</td><td>Gate starts at sigmoid(0)=0.5 (identity-like)</td></tr>
+  <tr><td>Attention logit init scale</td><td>&sigma; &asymp; 0.02 for Q, K projections</td><td>Keeps initial logits small</td></tr>
+  <tr><td>Sequence length schedule</td><td>512 &rarr; 2K &rarr; 8K &rarr; 32K+</td><td>Gradual length extension for stability</td></tr>
+</table>
+
+
+<h3>10.1 Fine-Tuning Stages (Path 1)</h3>
+
+<p>Step counts below are <em>order-of-magnitude</em> targets for a 3&ndash;7B base model. Swapping the
+attention nonlinearity is a substantial perturbation and recovery to baseline perplexity may require
+significantly more steps; treat Phase 1 as continued pretraining, not a short fine-tune.</p>
+
+<ol>
+  <li><strong>Phase 1 (~20K&ndash;50K steps):</strong> Replace softmax with ReLU&sup2; + QK-Norm. Train with
+  full-context encoding (standard causal attention) to adapt the model to the new attention function.
+  Monitor: perplexity within 0.1 nats of the softmax baseline before proceeding.</li>
+  <li><strong>Phase 2 (~10K steps):</strong> Convert sequential residual to parallel. Introduce
+  segment-independent encoding: randomly split documents into segments, encode independently, stitch KV
+  caches. Train on stitched outputs to learn &alpha; and &beta;.</li>
+  <li><strong>Phase 3 (~5K&ndash;10K steps):</strong> Enable micro-correction gates. Train with mixed
+  stitched/full-context examples (50/50). Gradually increase sequence length per the schedule above.</li>
+</ol>
+
+
+<h3>10.2 Compute Requirements (Path 2: Native Training)</h3>
+<table>
+  <tr><th>Model Size</th><th>GPUs</th><th>Time</th><th>Cost (Cloud)</th></tr>
+  <tr><td>1.5B (proof of concept)</td><td>32&times;A100</td><td>18 days</td><td>~$50K</td></tr>
+  <tr><td>7B (production)</td><td>128&times;H100</td><td>30 days</td><td>~$200K</td></tr>
+</table>
+
+
+<!-- ═══════════════════════════ SECTION 11 ═══════════════════════════ -->
+<h2>11. Performance Projections</h2>
+
+<table>
+  <tr><th>Scenario</th><th>Standard</th><th>KVLINK</th><th>HRoPE Path 1</th><th>Native HRoPE</th></tr>
+  <tr><td>100k tokens, edit 1 sentence</td><td>~5 sec</td><td>~0.5&ndash;1 sec</td><td>~0.3&ndash;0.6 sec</td><td>~0.1&ndash;0.3 sec</td></tr>
+  <tr><td>Accuracy vs. upper bound</td><td>N/A</td><td>~2&ndash;5% drop</td><td><strong>&le;1% drop</strong> (target)</td><td>&le;0.5% (target, aspirational)</td></tr>
+  <tr><td>Cache hit rate</td><td>0%</td><td>85&ndash;95%</td><td>85&ndash;95%</td><td>90&ndash;98%</td></tr>
+  <tr><td>Context extrapolation</td><td>2&ndash;4&times;</td><td>2&ndash;4&times;</td><td>2&ndash;4&times;</td><td>10&ndash;20&times;</td></tr>
+  <tr><td>Extra params for stitching</td><td>&mdash;</td><td>~few hundred</td><td><strong>~260K</strong> (scalar gates)</td><td>~260K (built-in)</td></tr>
+</table>
+
+<div class="callout callout-warn">
+  <strong>&#9888;&#65039; On accuracy and latency targets</strong>
+  <p>The &ldquo;&le;1% drop&rdquo; for Path 1 is grounded in the decomposability proof (exact at the attention
+  level) and the parallel-residual error analysis (&sect;4.3), but requires empirical validation. The
+  &ldquo;&le;0.5%&rdquo; for native HRoPE is aspirational and assumes the model can learn to compensate for
+  the architectural differences during pre-training. Both targets will be validated against KVLINK
+  baselines on LongBench.</p>
+  <p>The <strong>~5 sec standard baseline</strong> assumes <em>no prefix caching</em>. Modern serving stacks
+  (vLLM, SGLang, TGI) with prefix caching already handle append-only edits efficiently. HRoPE&rsquo;s
+  differentiation is on <em>mid-document</em> edits (insert/delete/replace in the middle), where prefix
+  caching cannot help. Latency comparisons should specify the edit type and the baseline serving stack.</p>
+</div>
+
+
+<!-- ═══════════════════════════ SECTION 12 ═══════════════════════════ -->
+<h2>12. Literature Review &amp; Differentiation</h2>
+
+<table>
+  <tr><th>Method</th><th>Attention</th><th>Cross-segment</th><th>Stitching</th><th>Extra params</th></tr>
+  <tr>
+    <td><strong>KVLINK</strong> (NeurIPS 2025)</td>
+    <td>Softmax</td>
+    <td>Link tokens</td>
+    <td>Approximate (online softmax)</td>
+    <td>~few hundred</td>
+  </tr>
+  <tr>
+    <td><strong>HRoPE v3</strong></td>
+    <td>ReLU (undefined norm)</td>
+    <td>50M correction model</td>
+    <td>Approximate</td>
+    <td>~50M</td>
+  </tr>
+  <tr>
+    <td><strong>HRoPE v4</strong></td>
+    <td>ReLU&sup2; + QK-Norm</td>
+    <td>Vector gates (~1.6M)</td>
+    <td>Exact given same q</td>
+    <td>~1.6M</td>
+  </tr>
+  <tr>
+    <td><strong>HRoPE v5.2</strong> (this work)</td>
+    <td>ReLU&sup2; + QK-Norm</td>
+    <td>Scalar or vector gates</td>
+    <td><strong>Exact given same q, K, V; per-layer error growth reduced from
+    ~(1+C)(1+L<sub>F</sub>) to 1+&alpha;C+&beta;L<sub>F</sub></strong></td>
+    <td>~260K (scalar) or ~33M (vector)</td>
+  </tr>
+</table>
+
+<p><strong>Key references:</strong></p>
+<ul>
+  <li><strong>KVLINK (Yang et al., NeurIPS 2025):</strong> Link tokens + positional re-encoding. Keeps softmax.
+  Accuracy drop ~2&ndash;5%. TTFT reduction 85&ndash;96%.</li>
+  <li><strong>Primer (So et al., Google 2021):</strong> Validates ReLU&sup2; attention quality, matching softmax
+  on language modeling with improved training efficiency.</li>
+  <li><strong>QK-Norm (Chameleon, ViT-22B):</strong> Production-validated logit bounding for stable training.</li>
+  <li><strong>PaLM / Gemma (Google):</strong> Validates parallel residual blocks at scale (540B and 7B).</li>
+  <li><strong>BiPE (2025):</strong> Validates bilevel positional encoding (local RoPE + global ALiBi).</li>
+</ul>
+
+<p><strong>Our contribution:</strong> First to combine decomposable normalized attention (ReLU&sup2; + denominator
+tracking) with QK-Norm, parallel residual, and hierarchical RoPE into a unified architecture with
+<em>provably exact attention stitching</em> at the attention level and an <em>architectural bound on
+per-layer error amplification</em>. The composite system &mdash; not any individual component &mdash; is the
+contribution; each component on its own is established prior art.</p>
+
+
+<!-- ═══════════════════════════ SECTION 13 ═══════════════════════════ -->
+<h2>13. Current Status &amp; Roadmap</h2>
+
+<table>
+  <tr><th>Status</th><th>Component</th></tr>
+  <tr><td>&#9989; Completed</td><td>RoPE re-rotation (PyTorch), KV cache concat, Llama/Qwen integration, LongBench benchmarking</td></tr>
+  <tr><td>&#128736;&#65039; In Progress</td><td>ReLU&sup2; + QK-Norm attention module, parallel residual conversion</td></tr>
+  <tr>
+    <td>&#128203; Next</td>
+    <td>
+      <ol style="margin: 0;">
+        <li>Implement Triton re-rotation kernel</li>
+        <li>Implement SimHash fuzzy cache</li>
+        <li>Fine-tune Llama-3.2-3B with v5.2 architecture (Path 1)</li>
+        <li>Benchmark vs. KVLINK on LongBench (NQ, 2WikiMQA, TriviaQA, HotpotQA, MuSiQue)</li>
+        <li>Native HRoPE training at 1.5B scale (Path 2)</li>
+      </ol>
+    </td>
+  </tr>
+</table>
+
+
+<!-- ═══════════════════════════ SECTION 14 ═══════════════════════════ -->
+<h2>14. Provisional Patent Claims (v5.2)</h2>
+
+<ol>
+  <li><strong>Claim 1:</strong> Denominator-tracked ReLU&sup2; attention for provably exact KV cache stitching
+  via per-segment sufficient statistics (N<sub>j</sub>, D<sub>j</sub>).</li>
+  <li><strong>Claim 2:</strong> QK-Norm (L2 normalization of Q and K) with learned per-head temperature for
+  logit-bounded, RoPE-compatible attention &mdash; proven compatible because rotation preserves norms.</li>
+  <li><strong>Claim 3:</strong> Use of parallel residual blocks for error-isolated independent segment encoding,
+  reducing the per-layer error-amplification factor from ~(1+C)(1+L<sub>F</sub>) (sequential) to
+  1+&alpha;C+&beta;L<sub>F</sub> (parallel) under bounded-attention assumptions provided by QK-Norm.</li>
+  <li><strong>Claim 4:</strong> Cached per-segment sufficient statistics (&mu;, &sigma; of key vectors) with
+  micro-correction gates (scalar or vector) replacing monolithic correction models.</li>
+  <li><strong>Claim 5:</strong> Zero-angle (pre-RoPE) KV storage with exact re-rotation by position
+  difference for incremental editing of arbitrary spans within a document. (The mathematical fact of
+  RoPE composability is well-known; the claim is on the use of this representation as the canonical
+  cache format for sentence-granularity edit-and-stitch workflows.)</li>
+  <li><strong>Claim 6:</strong> Hierarchical RoPE with per-dimension frequency vectors for sentence and token levels,
+  with learned sentence gap &lambda;.</li>
+  <li><strong>Claim 7:</strong> Bilevel positional encoding combining local RoPE (within segment) with global ALiBi
+  (across segments) for cross-segment attention ordering.</li>
+  <li><strong>Claim 8:</strong> Combined architecture (Claims 1&ndash;7) enabling O(&Delta;) incremental inference
+  for large language models, with provably exact attention stitching at the attention level and a
+  bounded per-layer error-amplification factor.</li>
+</ol>
+
+
+<!-- ═══════════════════════════ FOOTER ═══════════════════════════ -->
+<div class="footer">
+  <p>&#128236; Contact: Feng Zhou &mdash; Technical portfolio for L7 interview at Google. This document is part
+  of an ongoing research project with provably exact KV cache stitching.</p>
+  <p>&copy; 2026 Feng Zhou &mdash; HRoPE: Hierarchical Rotary Position Embedding. Confidential / Patent Pending.</p>
+</div>
+
+</body>
+</html>
