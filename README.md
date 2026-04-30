@@ -58,4 +58,4 @@ python hrope_v7_train.py --stage 1 --resume ckpt0.pt --save ckpt1.pt
 
 Reference compiles, all four invariants verified, all training stages run end-to-end. Next step: 350M-parameter ablation vs a dense baseline before scaling to 1.5B.
 
-© 2026 Feng Zhou — Patent Pending.
+© 2026 Feng Zhou — All Rights Reserved.
